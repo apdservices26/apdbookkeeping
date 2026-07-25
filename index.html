@@ -192,6 +192,15 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 .li-table td{padding:6px;vertical-align:top;}
 .li-table input{width:100%;border:1px solid var(--line);border-radius:6px;padding:7px 8px;font-size:13.5px;font-family:inherit;}
 .li-table .amt{text-align:right;font-variant-numeric:tabular-nums;padding-top:14px;font-weight:600;}
+@media (max-width:640px){
+  .li-table thead{display:none;}
+  .li-table, .li-table tbody{display:block;width:100%;}
+  .li-table tr{display:block;border:1px solid var(--line);border-radius:10px;padding:10px 10px 4px;margin-bottom:10px;position:relative;}
+  .li-table td{display:block;width:100%;padding:5px 0;}
+  .li-table td[data-label]::before{content:attr(data-label);display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;color:var(--ink-soft);font-weight:700;margin-bottom:3px;}
+  .li-table td.amt{text-align:left;padding-top:5px;font-size:15px;}
+  .li-table td.li-del-cell{position:absolute;top:6px;right:6px;width:auto;padding:0;}
+}
 
 /* Modal */
 .overlay{
@@ -392,7 +401,30 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   <!-- SETTINGS -->
   <section class="view" id="view-settings">
     <div class="card">
-      <h2>Sync between devices <small>Each device (phone, PC, browser) keeps its own local database. Sync moves data between them manually — no account or internet service required.</small></h2>
+      <h2>Google Drive sync <small>Automatic sync between all your devices via a private file in your own Google Drive. No server of ours involved — this app talks directly to Google.</small></h2>
+      <div id="gdriveNotConfigured">
+        <p class="hint" style="margin-bottom:10px;">One-time setup: create a free Google OAuth Client ID (see the setup guide provided separately), then paste it below.</p>
+        <div class="form-grid">
+          <div class="field full"><label>Google OAuth Client ID</label><input type="text" id="gdriveClientId" placeholder="xxxxxxxxxx.apps.googleusercontent.com"></div>
+        </div>
+        <button class="btn secondary sm" style="margin-top:10px;" onclick="saveGDriveClientId()">Save Client ID</button>
+      </div>
+      <div id="gdriveConfigured" style="display:none;">
+        <div class="actions" style="margin-bottom:10px;align-items:center;">
+          <span id="gdriveStatus" class="badge draft">Not connected</span>
+          <button class="btn sm" id="gdriveConnectBtn" onclick="connectGDrive()">🔗 Connect Google Drive</button>
+          <button class="btn secondary sm" id="gdriveSyncBtn" onclick="syncWithDrive(true)" style="display:none;">🔄 Sync now</button>
+          <button class="btn ghost sm" onclick="forgetGDriveClientId()">Change Client ID</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);font-weight:600;">
+          <input type="checkbox" id="gdriveAutoSync" style="width:auto;" onchange="saveAutoSyncPref()"> Auto-sync when the app opens and closes
+        </label>
+        <p class="hint" id="gdriveLastSync" style="margin-top:8px;"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Manual sync file <small>Alternative to Google Drive: export/import a file by hand — no account or internet needed.</small></h2>
       <div style="background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:13.5px;line-height:1.6;">
         <b style="color:var(--navy);">How to sync two devices:</b>
         <ol style="margin:8px 0 0;padding-left:20px;">
@@ -523,8 +555,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
         <input type="hidden" id="invId">
         <div class="field full">
           <label>Client</label>
-          <div style="display:flex;gap:8px;">
-            <select id="invClient" style="flex:1;" onchange="onInvoiceClientChange()" required></select>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <select id="invClient" style="flex:1;min-width:160px;" onchange="onInvoiceClientChange()" required></select>
             <button type="button" class="btn secondary sm" onclick="openClientsModal(true)">+ New</button>
           </div>
         </div>
@@ -1241,11 +1273,11 @@ function addLineItem(li){
   const body = document.getElementById('lineItemsBody');
   const row = document.createElement('tr');
   row.innerHTML = `
-    <td><input type="text" class="li-desc" value="${li? escapeHtml(li.description):''}" placeholder="e.g. Consulting hours"></td>
-    <td><input type="number" step="0.01" class="li-qty" value="${li? li.qty:1}" oninput="recalcLineAmount(this)"></td>
-    <td><input type="number" step="0.01" class="li-rate" value="${li? li.rate:''}" placeholder="0.00" oninput="recalcLineAmount(this)"></td>
-    <td class="amt li-amount">$0.00</td>
-    <td><button type="button" class="icon-btn del" onclick="this.closest('tr').remove(); recalcInvoiceTotals();">🗑️</button></td>`;
+    <td data-label="Description"><input type="text" class="li-desc" value="${li? escapeHtml(li.description):''}" placeholder="e.g. Consulting hours"></td>
+    <td data-label="Qty"><input type="number" step="0.01" class="li-qty" value="${li? li.qty:1}" oninput="recalcLineAmount(this)"></td>
+    <td data-label="Rate"><input type="number" step="0.01" class="li-rate" value="${li? li.rate:''}" placeholder="0.00" oninput="recalcLineAmount(this)"></td>
+    <td class="amt li-amount" data-label="Amount">$0.00</td>
+    <td class="li-del-cell"><button type="button" class="icon-btn del" onclick="this.closest('tr').remove(); recalcInvoiceTotals();">🗑️</button></td>`;
   body.appendChild(row);
   recalcLineAmount(row.querySelector('.li-qty'));
 }
@@ -1649,6 +1681,171 @@ apdservices26@gmail.com
   }, 600);
 }
 
+/* =====================================================
+   GOOGLE DRIVE SYNC
+   Uses Google Identity Services (OAuth) + Drive API's
+   hidden "appDataFolder" — a private storage space only
+   this app can see; nothing shows up in the user's normal
+   Drive UI, and this app never sees the user's other files.
+===================================================== */
+const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+const GDRIVE_FILENAME = 'apd_bookkeeping_sync.json';
+let gdriveTokenClient = null;
+let gdriveAccessToken = null;
+let gdriveFileId = null;
+let gdriveSyncing = false;
+
+function gLS_get(key){ try{ return localStorage.getItem(key); }catch(e){ return null; } }
+function gLS_set(key,val){ try{ localStorage.setItem(key,val); }catch(e){} }
+function gLS_remove(key){ try{ localStorage.removeItem(key); }catch(e){} }
+
+function initGDriveUI(){
+  const clientId = gLS_get('gdrive_client_id');
+  document.getElementById('gdriveNotConfigured').style.display = clientId ? 'none' : 'block';
+  document.getElementById('gdriveConfigured').style.display = clientId ? 'block' : 'none';
+  if(clientId){
+    document.getElementById('gdriveAutoSync').checked = gLS_get('gdrive_autosync') === '1';
+    const last = gLS_get('gdrive_last_sync');
+    document.getElementById('gdriveLastSync').textContent = last ? `Last synced: ${new Date(parseInt(last)).toLocaleString()}` : 'Never synced yet.';
+  }
+}
+function saveGDriveClientId(){
+  const val = document.getElementById('gdriveClientId').value.trim();
+  if(!val.endsWith('.apps.googleusercontent.com')){ alert('That doesn\'t look like a valid Google OAuth Client ID (should end in .apps.googleusercontent.com).'); return; }
+  gLS_set('gdrive_client_id', val);
+  initGDriveUI();
+  toast('Client ID saved');
+}
+function forgetGDriveClientId(){
+  if(!confirm('Remove the saved Client ID? You\'ll need to paste it again to reconnect.')) return;
+  gLS_remove('gdrive_client_id');
+  gdriveAccessToken = null; gdriveTokenClient = null;
+  initGDriveUI();
+}
+function saveAutoSyncPref(){
+  gLS_set('gdrive_autosync', document.getElementById('gdriveAutoSync').checked ? '1' : '0');
+}
+
+function loadGIS(){
+  if(window.google && window.google.accounts) return Promise.resolve();
+  return new Promise((resolve,reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.onload = ()=>resolve();
+    s.onerror = ()=>reject(new Error('Could not load Google Sign-In. Check your internet connection.'));
+    document.head.appendChild(s);
+  });
+}
+
+function setGDriveStatus(text, cls){
+  const el = document.getElementById('gdriveStatus');
+  el.textContent = text;
+  el.className = 'badge ' + (cls||'draft');
+}
+
+async function connectGDrive(){
+  const clientId = gLS_get('gdrive_client_id');
+  if(!clientId){ alert('Paste your Google OAuth Client ID first.'); return; }
+  try{
+    await loadGIS();
+    if(!gdriveTokenClient){
+      gdriveTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: GDRIVE_SCOPE,
+        callback: async (resp)=>{
+          if(resp.error){ setGDriveStatus('Connection failed','overdue'); alert('Google Drive connection failed: ' + resp.error); return; }
+          gdriveAccessToken = resp.access_token;
+          setGDriveStatus('Connected','paid');
+          document.getElementById('gdriveSyncBtn').style.display = 'inline-flex';
+          document.getElementById('gdriveConnectBtn').textContent = '🔗 Reconnect';
+          await syncWithDrive(true);
+        }
+      });
+    }
+    setGDriveStatus('Connecting…','sent');
+    gdriveTokenClient.requestAccessToken({prompt: gdriveAccessToken ? '' : 'consent'});
+  }catch(err){
+    setGDriveStatus('Connection failed','overdue');
+    alert(err.message);
+  }
+}
+
+async function gdriveApi(url, options){
+  options = options || {};
+  options.headers = Object.assign({}, options.headers, {'Authorization': 'Bearer ' + gdriveAccessToken});
+  const res = await fetch(url, options);
+  if(res.status === 401){ throw new Error('Google Drive session expired — click Connect again.'); }
+  return res;
+}
+
+async function gdriveFindFile(){
+  const res = await gdriveApi(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%27${GDRIVE_FILENAME}%27&fields=files(id,modifiedTime)`);
+  const data = await res.json();
+  if(data.files && data.files.length){ gdriveFileId = data.files[0].id; return data.files[0]; }
+  gdriveFileId = null;
+  return null;
+}
+async function gdriveDownload(fileId){
+  const res = await gdriveApi(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  return await res.json();
+}
+async function gdriveUpload(payload){
+  const body = JSON.stringify(payload);
+  if(gdriveFileId){
+    await gdriveApi(`https://www.googleapis.com/upload/drive/v3/files/${gdriveFileId}?uploadType=media`, {
+      method:'PATCH', headers:{'Content-Type':'application/json'}, body
+    });
+  } else {
+    const metadata = {name: GDRIVE_FILENAME, parents: ['appDataFolder']};
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
+    form.append('file', new Blob([body], {type:'application/json'}));
+    const res = await gdriveApi('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {method:'POST', body: form});
+    const created = await res.json();
+    gdriveFileId = created.id;
+  }
+}
+
+async function syncWithDrive(manual){
+  if(!gdriveAccessToken){ if(manual) alert('Connect Google Drive first.'); return; }
+  if(gdriveSyncing) return;
+  gdriveSyncing = true;
+  if(manual) setGDriveStatus('Syncing…','sent');
+  try{
+    const remoteMeta = await gdriveFindFile();
+    let added=0, updated=0;
+    if(remoteMeta){
+      const remote = await gdriveDownload(remoteMeta.id);
+      if(remote && Array.isArray(remote.transactions)){
+        const r1 = await upsertMerge('transactions', remote.transactions, ALL_TXNS);
+        const r2 = await upsertMerge('invoices', remote.invoices||[], ALL_INVOICES);
+        const r3 = await upsertMerge('clients', remote.clients||[], ALL_CLIENTS);
+        added = r1.added+r2.added+r3.added; updated = r1.updated+r2.updated+r3.updated;
+        await reloadAll();
+      }
+    }
+    // Push merged local state back up so Drive always holds the latest combined snapshot
+    const payload = {app:'apd-bookkeeping', version:2, exportedAt:new Date().toISOString(), transactions:ALL_TXNS, invoices:ALL_INVOICES, clients:ALL_CLIENTS};
+    await gdriveUpload(payload);
+    gLS_set('gdrive_last_sync', String(Date.now()));
+    initGDriveUI();
+    setGDriveStatus('Connected','paid');
+    if(manual) toast(`Synced with Google Drive: ${added} added, ${updated} updated`);
+  }catch(err){
+    setGDriveStatus('Sync error','overdue');
+    if(manual) alert('Sync failed: ' + err.message);
+    console.warn('Drive sync failed', err);
+  }
+  gdriveSyncing = false;
+}
+
+/* Best-effort sync when the tab is hidden/closed (e.g. switching apps on phone) */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'hidden' && gdriveAccessToken && gLS_get('gdrive_autosync')==='1'){
+    syncWithDrive(false);
+  }
+});
+
 /* ---------- Rendering: Monthly Summary ---------- */
 function ensureFyOptions(sel){
   const cur = sel.value;
@@ -1818,12 +2015,33 @@ async function reloadAll(){
   populateCategorySelect(document.getElementById('txnCategory'), false, 'Income');
   renderCoa();
   await reloadAll();
+  initGDriveUI();
 
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
   if(!isStandalone) document.getElementById('installBanner').classList.add('show');
 
   if('serviceWorker' in navigator){
     try{ await navigator.serviceWorker.register('sw.js'); }catch(e){ console.warn('SW registration failed', e); }
+  }
+
+  // Attempt a quiet, non-interactive Drive sync on open if configured + auto-sync enabled
+  if(gLS_get('gdrive_client_id') && gLS_get('gdrive_autosync')==='1'){
+    try{
+      await loadGIS();
+      gdriveTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: gLS_get('gdrive_client_id'),
+        scope: GDRIVE_SCOPE,
+        callback: async (resp)=>{
+          if(resp.error) return;
+          gdriveAccessToken = resp.access_token;
+          setGDriveStatus('Connected','paid');
+          document.getElementById('gdriveSyncBtn').style.display = 'inline-flex';
+          document.getElementById('gdriveConnectBtn').textContent = '🔗 Reconnect';
+          await syncWithDrive(false);
+        }
+      });
+      gdriveTokenClient.requestAccessToken({prompt:''}); // silent — no popup if already granted
+    }catch(e){ console.warn('Silent Drive sync skipped', e); }
   }
 })();
 </script>
