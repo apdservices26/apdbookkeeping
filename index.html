@@ -238,6 +238,13 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 }
 #installBanner.show{display:flex;}
 
+#localBackupBanner{
+  display:none;background:var(--amber-bg);border:1px solid #EBD199;color:var(--amber);
+  padding:10px 16px;border-radius:10px;font-size:13px;margin-bottom:16px;
+  align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+}
+#localBackupBanner.show{display:flex;}
+
 .footer-note{text-align:center;font-size:11.5px;color:var(--ink-soft);margin-top:26px;}
 </style>
 </head>
@@ -262,6 +269,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   <div id="installBanner">
     <span>📲 Install this app on your device: use your browser menu → <b>"Add to Home screen"</b> (Android) or <b>"Install app"</b> (Windows/Chrome) for offline, app-like access.</span>
     <button class="btn ghost sm" onclick="document.getElementById('installBanner').classList.remove('show')">Dismiss</button>
+  </div>
+
+  <div id="localBackupBanner">
+    <span>💾 It's been a while since your last local backup. This works even without Google Drive connected.</span>
+    <div style="display:flex;gap:8px;">
+      <button class="btn sm" onclick="exportJson(); snoozeLocalBackupNudge(); document.getElementById('localBackupBanner').classList.remove('show');">Back up now</button>
+      <button class="btn ghost sm" onclick="snoozeLocalBackupNudge()">Remind me later</button>
+    </div>
   </div>
 
   <nav class="tabs">
@@ -305,20 +320,21 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
       <div class="toolbar">
         <h2 style="margin:0;">All transactions</h2>
         <div class="actions">
+          <button class="btn danger sm" id="txnBulkBar" style="display:none;" onclick="bulkDeleteTxns()">🗑️ Delete selected (<span id="txnBulkCount">0</span>)</button>
           <button class="btn secondary sm" onclick="openImportModal()">⬆ Import bank CSV</button>
           <button class="btn secondary sm" onclick="exportCsv()">⬇ Export CSV</button>
           <button class="btn sm" onclick="openTxnModal()">+ Add transaction</button>
         </div>
       </div>
       <div class="filters">
-        <input type="search" id="fSearch" placeholder="Search description, client/vendor, notes…" oninput="renderTransactions()">
-        <select id="fType" onchange="renderTransactions()">
+        <input type="search" id="fSearch" placeholder="Search description, client/vendor, notes…" oninput="onTxnFilterChange()">
+        <select id="fType" onchange="onTxnFilterChange()">
           <option value="">All types</option>
           <option value="Income">Income</option>
           <option value="Expense">Expense</option>
         </select>
-        <select id="fCategory" onchange="renderTransactions()"><option value="">All categories</option></select>
-        <select id="fFY" onchange="renderTransactions()"></select>
+        <select id="fCategory" onchange="onTxnFilterChange()"><option value="">All categories</option></select>
+        <select id="fFY" onchange="onTxnFilterChange()"></select>
       </div>
       <div id="txnTable" class="table-wrap"></div>
     </div>
@@ -330,26 +346,27 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
       <div class="toolbar">
         <h2 style="margin:0;">Invoices</h2>
         <div class="actions">
+          <button class="btn danger sm" id="invBulkBar" style="display:none;" onclick="bulkDeleteInvoices()">🗑️ Delete selected (<span id="invBulkCount">0</span>)</button>
           <button class="btn secondary sm" onclick="openClientsModal()">👤 Manage clients</button>
           <button class="btn sm" onclick="openInvoiceModal()">+ New invoice</button>
         </div>
       </div>
       <div class="filters">
-        <input type="search" id="iSearch" placeholder="Search invoice #, client…" oninput="renderInvoices()">
-        <select id="iStatus" onchange="renderInvoices()">
+        <input type="search" id="iSearch" placeholder="Search invoice #, client…" oninput="onInvoiceFilterChange()">
+        <select id="iStatus" onchange="onInvoiceFilterChange()">
           <option value="">All statuses</option>
           <option value="Draft">Draft</option>
           <option value="Sent">Sent</option>
           <option value="Overdue">Overdue</option>
           <option value="Paid">Paid</option>
         </select>
-        <select id="iService" onchange="renderInvoices()">
+        <select id="iService" onchange="onInvoiceFilterChange()">
           <option value="">All service lines</option>
           <option value="Consulting">Consulting</option>
           <option value="Photography">Photography</option>
           <option value="Other">Other</option>
         </select>
-        <select id="iFY" onchange="renderInvoices()"></select>
+        <select id="iFY" onchange="onInvoiceFilterChange()"></select>
       </div>
       <div id="invoicesTable" class="table-wrap"></div>
     </div>
@@ -363,7 +380,10 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
       <div class="stat"><div class="label">Not yet due</div><div class="value" id="arCurrent">$0.00</div><div class="sub">Sent, within terms</div></div>
     </div>
     <div class="card">
-      <h2>Outstanding invoices <small>Sorted oldest due date first</small></h2>
+      <div class="toolbar" style="margin-bottom:0;">
+        <h2 style="margin:0;">Outstanding invoices <small style="display:block;font-weight:500;color:var(--ink-soft);">Sorted oldest due date first</small></h2>
+        <button class="btn danger sm" id="arBulkBar" style="display:none;" onclick="bulkDeleteArInvoices()">🗑️ Delete selected (<span id="arBulkCount">0</span>)</button>
+      </div>
       <div id="arTable" class="table-wrap"></div>
     </div>
   </section>
@@ -439,18 +459,18 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);font-weight:600;">
           <input type="checkbox" id="gdriveAutoSync" style="width:auto;" onchange="saveAutoSyncPref()"> Auto-sync every 5 minutes while the app is open (plus on open/close)
         </label>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-          <label style="font-size:13px;color:var(--ink-soft);font-weight:600;">Also sync every</label>
-          <select id="gdriveSyncInterval" onchange="saveSyncIntervalPref()" style="padding:6px 10px;font-size:13px;">
-            <option value="0">Off — only on open/close</option>
-            <option value="5">5 minutes</option>
-            <option value="15">15 minutes</option>
-            <option value="30">30 minutes</option>
-            <option value="60">1 hour</option>
-          </select>
-          <span style="font-size:13px;color:var(--ink-soft);">while the app is open</span>
-        </div>
         <p class="hint" id="gdriveLastSync" style="margin-top:8px;"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Backups <small>Point-in-time snapshots, separate from the live sync file, so a mistake that gets synced doesn't erase your only backup too.</small></h2>
+      <p class="hint" style="margin-bottom:10px;">A dated snapshot is saved automatically to your Google Drive every time you sync. Keeps roughly the last 7 syncs plus up to 4 older weekly-spaced snapshots, so you have real history to fall back on — not just the live copy.</p>
+      <div class="actions" style="margin-bottom:10px;">
+        <button class="btn secondary sm" onclick="openBackupBrowser()">📂 View available backups</button>
+      </div>
+      <div id="backupListWrap" style="display:none;margin-top:6px;">
+        <div id="backupList"></div>
       </div>
     </div>
 
@@ -592,8 +612,10 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
       </form>
     </div>
     <div class="modal-foot">
-      <button class="btn ghost" onclick="closeTxnModal()">Cancel</button>
-      <button class="btn" onclick="saveTxn()">Save transaction</button>
+      <button class="btn ghost" onclick="closeTxnModal()" id="txnCancelBtn">Cancel</button>
+      <button class="btn danger" onclick="deleteTxnFromModal()" id="txnDeleteBtn" style="display:none;">🗑️ Delete</button>
+      <button class="btn secondary" onclick="unlockTxnForm()" id="txnEditBtn" style="display:none;">✏️ Edit</button>
+      <button class="btn" onclick="saveTxn()" id="txnSaveBtn">Save transaction</button>
     </div>
   </div>
 </div>
@@ -673,9 +695,11 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
       </form>
     </div>
     <div class="modal-foot">
-      <button class="btn ghost" onclick="closeInvoiceModal()">Cancel</button>
-      <button class="btn secondary" onclick="saveInvoice('Draft')">Save as draft</button>
-      <button class="btn" onclick="saveInvoice('Sent')">Save & mark sent</button>
+      <button class="btn ghost" onclick="closeInvoiceModal()" id="invCancelBtn">Cancel</button>
+      <button class="btn danger" onclick="deleteInvoiceFromModal()" id="invDeleteBtn" style="display:none;">🗑️ Delete</button>
+      <button class="btn secondary" onclick="unlockInvoiceForm()" id="invEditBtn" style="display:none;">✏️ Edit</button>
+      <button class="btn secondary" onclick="saveInvoice('Draft')" id="invSaveDraftBtn">Save as draft</button>
+      <button class="btn" onclick="saveInvoice('Sent')" id="invSaveSentBtn">Save & mark sent</button>
     </div>
   </div>
 </div>
@@ -736,6 +760,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
             <div class="field"><label>Date column</label><select id="mapDate"></select></div>
             <div class="field"><label>Description column</label><select id="mapDesc1"></select></div>
             <div class="field"><label>Description column 2 (optional)</label><select id="mapDesc2"><option value="">(none)</option></select></div>
+            <div class="field"><label>Account type column (optional)</label><select id="mapAccountType"><option value="">(none)</option></select></div>
+            <div class="field"><label>Account number column (optional)</label><select id="mapAccountNum"><option value="">(none)</option></select></div>
             <div class="field"><label>Amount format</label>
               <select id="mapAmountFormat" onchange="toggleAmountMode()">
                 <option value="signed">Single signed column (negative = money out)</option>
@@ -759,7 +785,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
           </div>
           <div class="table-wrap" style="max-height:420px;overflow-y:auto;">
             <table id="importPreviewTable"><thead><tr>
-              <th></th><th>Date</th><th>Description</th><th style="text-align:right">Amount</th><th>Type</th><th>Category</th><th>Flags</th>
+              <th></th><th>Date</th><th>Description</th><th>Account</th><th style="text-align:right">Amount</th><th>Type</th><th>Category</th><th>Flags</th>
             </tr></thead><tbody id="importPreviewBody"></tbody></table>
           </div>
         </div>
@@ -1194,7 +1220,8 @@ function compressDataUrl(dataUrl, callback){
 }
 
 /* ---------- Transaction Modal ---------- */
-function openTxnModal(existing){
+function openTxnModal(existing, opts){
+  opts = opts || {};
   document.getElementById('txnForm').reset();
   document.getElementById('txnId').value = '';
   document.getElementById('txnDate').value = todayStr();
@@ -1202,7 +1229,7 @@ function openTxnModal(existing){
   refreshTxnCategoryOptions();
   showReceiptPreview(null);
   if(existing){
-    document.getElementById('modalTitle').textContent = 'Edit transaction';
+    document.getElementById('modalTitle').textContent = opts.readonly ? 'Transaction details' : 'Edit transaction';
     document.getElementById('txnId').value = existing.id;
     document.getElementById('txnDate').value = existing.date;
     document.getElementById('txnType').value = existing.type;
@@ -1219,7 +1246,30 @@ function openTxnModal(existing){
     document.getElementById('modalTitle').textContent = 'Add transaction';
   }
   calcTotal();
+  setTxnFormReadonly(!!opts.readonly);
   document.getElementById('txnOverlay').classList.add('open');
+}
+function setTxnFormReadonly(readonly){
+  const form = document.getElementById('txnForm');
+  form.querySelectorAll('input, select, textarea').forEach(el=> el.disabled = readonly);
+  form.querySelectorAll('button').forEach(btn=> btn.style.display = readonly ? 'none' : '');
+  if(readonly) document.getElementById('receiptEmpty').style.display = 'none';
+  else if(!receiptDraft) document.getElementById('receiptEmpty').style.display = 'flex';
+  document.getElementById('txnSaveBtn').style.display = readonly ? 'none' : 'inline-flex';
+  document.getElementById('txnEditBtn').style.display = readonly ? 'inline-flex' : 'none';
+  const isExisting = !!document.getElementById('txnId').value;
+  document.getElementById('txnDeleteBtn').style.display = (!readonly && isExisting) ? 'inline-flex' : 'none';
+  document.getElementById('txnCancelBtn').textContent = readonly ? 'Close' : 'Cancel';
+}
+async function deleteTxnFromModal(){
+  const id = document.getElementById('txnId').value;
+  if(!id) return;
+  await removeTxn(id);
+  closeTxnModal();
+}
+function unlockTxnForm(){
+  document.getElementById('modalTitle').textContent = 'Edit transaction';
+  setTxnFormReadonly(false);
 }
 function closeTxnModal(){ document.getElementById('txnOverlay').classList.remove('open'); }
 function calcTotal(){
@@ -1330,6 +1380,9 @@ function renderDashboard(){
 }
 
 /* ---------- Rendering: Transactions ---------- */
+let selectedTxnIds = new Set();
+let currentTxnListIds = [];
+
 function ensureFilterOptions(){
   const catSel = document.getElementById('fCategory');
   if(catSel.options.length<=1) populateCategorySelect(catSel, true);
@@ -1338,6 +1391,7 @@ function ensureFilterOptions(){
   fySel.innerHTML = '<option value="">All fiscal years</option>' + fyList().map(fy=>`<option value="${fy}">${fyLabel(fy)}</option>`).join('');
   if(cur) fySel.value = cur;
 }
+function onTxnFilterChange(){ selectedTxnIds.clear(); renderTransactions(); }
 function renderTransactions(){
   ensureFilterOptions();
   const search = document.getElementById('fSearch').value.toLowerCase();
@@ -1350,35 +1404,65 @@ function renderTransactions(){
   if(cat) list = list.filter(t=>t.category===cat);
   if(fy) list = list.filter(t=>String(fyForDate(t.date))===fy);
   list.sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  currentTxnListIds = list.map(t=>t.id);
   document.getElementById('txnTable').innerHTML = list.length===0
     ? `<div class="empty"><div class="big">🔍</div>No transactions match your filters.</div>`
     : renderTxnTable(list, true);
+  updateTxnBulkBar();
 }
-function renderTxnTable(list, showActions){
+function renderTxnTable(list, selectable){
+  const allChecked = selectable && list.length>0 && list.every(t=>selectedTxnIds.has(t.id));
   return `<table><thead><tr>
+    ${selectable? `<th><input type="checkbox" ${allChecked?'checked':''} onchange="toggleAllVisibleTxns(this.checked)" title="Select all visible"></th>`:''}
     <th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Client/Vendor</th>
     <th style="text-align:right">Amount</th><th style="text-align:right">GST/HST</th><th style="text-align:right">Total</th>
-    <th></th>
-    ${showActions? '<th></th>':''}
   </tr></thead><tbody>
     ${list.map(t=>`<tr>
+      ${selectable? `<td><input type="checkbox" ${selectedTxnIds.has(t.id)?'checked':''} onchange="toggleTxnSelect('${t.id}', this.checked)"></td>`:''}
       <td>${t.date}</td>
       <td><span class="badge ${t.type==='Income'?'income':'expense'}">${t.type}</span></td>
       <td>${escapeHtml(t.category)}</td>
-      <td>${escapeHtml(t.description)||'<span style="color:var(--ink-soft)">—</span>'}${t.invoiceNumber? `<div style="font-size:11px;color:var(--ink-soft);">🧾 ${escapeHtml(t.invoiceNumber)}</div>`:''}</td>
+      <td><a href="#" onclick="event.preventDefault(); openTxnDetail('${t.id}')" style="color:var(--navy);font-weight:600;text-decoration:none;">${escapeHtml(t.description)||'(no description)'}</a>${t.invoiceNumber? `<div style="font-size:11px;color:var(--ink-soft);">🧾 ${escapeHtml(t.invoiceNumber)}</div>`:''}${t.receipt&&t.receipt.dataUrl?'<div style="font-size:11px;color:var(--ink-soft);">📎 receipt attached</div>':''}</td>
       <td>${escapeHtml(t.party)||'<span style="color:var(--ink-soft)">—</span>'}</td>
       <td class="num">${fmt(t.amount)}</td>
       <td class="num">${fmt(t.gst)}</td>
       <td class="num"><b>${fmt(t.total)}</b></td>
-      <td>${t.receipt && t.receipt.dataUrl ? `<button class="icon-btn" title="View receipt" onclick='viewReceipt("${t.id}")'>🧾</button>` : ''}</td>
-      ${showActions? `<td><div class="row-actions">
-        <button class="icon-btn" title="Edit" onclick='editTxn("${t.id}")'>✏️</button>
-        <button class="icon-btn del" title="Delete" onclick='removeTxn("${t.id}")'>🗑️</button>
-      </div></td>` : ''}
     </tr>`).join('')}
   </tbody></table>`;
 }
-function viewReceipt(id){ const t = ALL_TXNS.find(x=>x.id===id); if(t && t.receipt && t.receipt.dataUrl) openReceiptImage(t.receipt.dataUrl); }
+function toggleTxnSelect(id, checked){
+  if(checked) selectedTxnIds.add(id); else selectedTxnIds.delete(id);
+  updateTxnBulkBar();
+}
+function toggleAllVisibleTxns(checked){
+  if(checked) currentTxnListIds.forEach(id=>selectedTxnIds.add(id));
+  else currentTxnListIds.forEach(id=>selectedTxnIds.delete(id));
+  renderTransactions();
+}
+function updateTxnBulkBar(){
+  const bar = document.getElementById('txnBulkBar');
+  if(!bar) return;
+  if(selectedTxnIds.size>0){
+    bar.style.display = 'inline-flex';
+    document.getElementById('txnBulkCount').textContent = selectedTxnIds.size;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+async function bulkDeleteTxns(){
+  const ids = Array.from(selectedTxnIds);
+  if(ids.length===0) return;
+  if(!confirm(`Delete ${ids.length} transaction${ids.length>1?'s':''}? This cannot be undone.`)) return;
+  const now = Date.now();
+  for(const id of ids){
+    const t = ALL_TXNS.find(x=>x.id===id);
+    if(t){ t.deleted = true; t.lastModified = now; await putTxn(t); }
+  }
+  selectedTxnIds.clear();
+  await reloadAll();
+  toast(`Deleted ${ids.length} transaction${ids.length>1?'s':''}`);
+}
+function openTxnDetail(id){ const t = ALL_TXNS.find(x=>x.id===id); if(t) openTxnModal(t, {readonly:true}); }
 function editTxn(id){ const t = ALL_TXNS.find(x=>x.id===id); if(t) openTxnModal(t); }
 
 /* =====================================================
@@ -1551,7 +1635,8 @@ function onInvoiceClientChange(){
   if(c && c.serviceLine) document.getElementById('invService').value = c.serviceLine;
 }
 
-function openInvoiceModal(existing){
+function openInvoiceModal(existing, opts){
+  opts = opts || {};
   document.getElementById('invoiceForm').reset();
   document.getElementById('invId').value = '';
   document.getElementById('lineItemsBody').innerHTML = '';
@@ -1562,7 +1647,7 @@ function openInvoiceModal(existing){
   onTermsChange();
 
   if(existing){
-    document.getElementById('invoiceModalTitle').textContent = 'Edit invoice ' + existing.number;
+    document.getElementById('invoiceModalTitle').textContent = opts.readonly ? 'Invoice ' + existing.number : 'Edit invoice ' + existing.number;
     document.getElementById('invId').value = existing.id;
     document.getElementById('invNumber').value = existing.number;
     document.getElementById('invClient').value = existing.clientId;
@@ -1586,7 +1671,30 @@ function openInvoiceModal(existing){
     document.getElementById('invNumber').value = nextInvoiceNumber(new Date().getFullYear());
     addLineItem();
   }
+  setInvoiceFormReadonly(!!opts.readonly);
   document.getElementById('invoiceOverlay').classList.add('open');
+}
+function setInvoiceFormReadonly(readonly){
+  const form = document.getElementById('invoiceForm');
+  form.querySelectorAll('input, select, textarea').forEach(el=> el.disabled = readonly);
+  form.querySelectorAll('button').forEach(btn=> btn.style.display = readonly ? 'none' : '');
+  const isExisting = !!document.getElementById('invId').value;
+  document.getElementById('invSaveDraftBtn').style.display = readonly ? 'none' : 'inline-flex';
+  document.getElementById('invSaveSentBtn').style.display = readonly ? 'none' : 'inline-flex';
+  document.getElementById('invEditBtn').style.display = readonly ? 'inline-flex' : 'none';
+  document.getElementById('invDeleteBtn').style.display = (!readonly && isExisting) ? 'inline-flex' : 'none';
+  document.getElementById('invCancelBtn').textContent = readonly ? 'Close' : 'Cancel';
+}
+function unlockInvoiceForm(){
+  const existing = ALL_INVOICES.find(x=>x.id===document.getElementById('invId').value);
+  document.getElementById('invoiceModalTitle').textContent = 'Edit invoice ' + (existing?existing.number:'');
+  setInvoiceFormReadonly(false);
+}
+async function deleteInvoiceFromModal(){
+  const id = document.getElementById('invId').value;
+  if(!id) return;
+  await deleteInvoiceConfirm(id);
+  closeInvoiceModal();
 }
 function closeInvoiceModal(){ document.getElementById('invoiceOverlay').classList.remove('open'); }
 
@@ -1724,6 +1832,9 @@ async function confirmMarkPaid(){
 }
 
 /* Invoice list rendering */
+let selectedInvIds = new Set();
+let currentInvListIds = [];
+function onInvoiceFilterChange(){ selectedInvIds.clear(); renderInvoices(); }
 function ensureInvoiceFilterOptions(){
   const fySel = document.getElementById('iFY');
   const cur = fySel.value;
@@ -1736,6 +1847,33 @@ function statusBadgeClass(s){
 function serviceBadgeClass(s){
   return {Consulting:'consulting', Photography:'photography', Other:'other'}[s] || 'other';
 }
+function toggleInvSelect(id, checked){ if(checked) selectedInvIds.add(id); else selectedInvIds.delete(id); updateInvBulkBar(); }
+function toggleAllVisibleInv(checked){
+  if(checked) currentInvListIds.forEach(id=>selectedInvIds.add(id));
+  else currentInvListIds.forEach(id=>selectedInvIds.delete(id));
+  renderInvoices();
+}
+function updateInvBulkBar(){
+  const bar = document.getElementById('invBulkBar');
+  if(!bar) return;
+  if(selectedInvIds.size>0){ bar.style.display='inline-flex'; document.getElementById('invBulkCount').textContent = selectedInvIds.size; }
+  else bar.style.display = 'none';
+}
+async function bulkDeleteInvoices(){
+  const ids = Array.from(selectedInvIds);
+  if(ids.length===0) return;
+  if(!confirm(`Delete ${ids.length} invoice${ids.length>1?'s':''}? This cannot be undone.`)) return;
+  const now = Date.now();
+  for(const id of ids){
+    const inv = ALL_INVOICES.find(x=>x.id===id);
+    if(inv){ inv.deleted = true; inv.lastModified = now; await putInvoice(inv); }
+  }
+  selectedInvIds.clear();
+  await reloadAll();
+  toast(`Deleted ${ids.length} invoice${ids.length>1?'s':''}`);
+}
+function openInvoiceDetail(id){ const inv = ALL_INVOICES.find(x=>x.id===id); if(inv) openInvoiceModal(inv, {readonly:true}); }
+
 function renderInvoices(){
   ensureInvoiceFilterOptions();
   const search = document.getElementById('iSearch').value.toLowerCase();
@@ -1749,14 +1887,18 @@ function renderInvoices(){
   if(serviceF) list = list.filter(x=>x.inv.serviceLine===serviceF);
   if(fyF) list = list.filter(x=>String(fyForDate(x.inv.issueDate))===fyF);
   list.sort((a,b)=> b.inv.issueDate.localeCompare(a.inv.issueDate) || b.inv.number.localeCompare(a.inv.number));
+  currentInvListIds = list.map(x=>x.inv.id);
 
   const el = document.getElementById('invoicesTable');
-  if(list.length===0){ el.innerHTML = `<div class="empty"><div class="big">🧾</div>No invoices match. Click "+ New invoice" to create one.</div>`; return; }
+  if(list.length===0){ el.innerHTML = `<div class="empty"><div class="big">🧾</div>No invoices match. Click "+ New invoice" to create one.</div>`; updateInvBulkBar(); return; }
+  const allChecked = list.length>0 && list.every(x=>selectedInvIds.has(x.inv.id));
   el.innerHTML = `<table><thead><tr>
+    <th><input type="checkbox" ${allChecked?'checked':''} onchange="toggleAllVisibleInv(this.checked)" title="Select all visible"></th>
     <th>#</th><th>Client</th><th>Service</th><th>Issued</th><th>Due</th><th>Status</th><th style="text-align:right">Total</th><th></th>
   </tr></thead><tbody>
     ${list.map(({inv,status,totals})=>`<tr class="${status==='Overdue'?'overdue-row':''}">
-      <td><b>${escapeHtml(inv.number)}</b></td>
+      <td><input type="checkbox" ${selectedInvIds.has(inv.id)?'checked':''} onchange="toggleInvSelect('${inv.id}', this.checked)"></td>
+      <td><a href="#" onclick="event.preventDefault(); openInvoiceDetail('${inv.id}')" style="color:var(--navy);font-weight:700;text-decoration:none;">${escapeHtml(inv.number)}</a></td>
       <td>${escapeHtml(inv.clientSnapshot ? inv.clientSnapshot.name : '')}</td>
       <td><span class="badge ${serviceBadgeClass(inv.serviceLine)}">${inv.serviceLine}</span></td>
       <td>${inv.issueDate}</td>
@@ -1768,20 +1910,47 @@ function renderInvoices(){
         <button class="icon-btn" title="Email" onclick='emailInvoice("${inv.id}")'>✉️</button>
         ${status==='Draft' ? `<button class="icon-btn" title="Mark sent" onclick='markSent("${inv.id}")'>📤</button>` : ''}
         ${status!=='Paid' ? `<button class="icon-btn" title="Mark paid" onclick='openPaidModal("${inv.id}")'>✅</button>` : ''}
-        <button class="icon-btn" title="Edit" onclick='editInvoiceOpen("${inv.id}")'>✏️</button>
         <button class="icon-btn" title="Duplicate" onclick='duplicateInvoice("${inv.id}")'>⧉</button>
-        <button class="icon-btn del" title="Delete" onclick='deleteInvoiceConfirm("${inv.id}")'>🗑️</button>
       </div></td>
     </tr>`).join('')}
   </tbody></table>`;
+  updateInvBulkBar();
 }
 
 /* Accounts Receivable */
+let selectedArIds = new Set();
+let currentArListIds = [];
+function toggleArSelect(id, checked){ if(checked) selectedArIds.add(id); else selectedArIds.delete(id); updateArBulkBar(); }
+function toggleAllVisibleAr(checked){
+  if(checked) currentArListIds.forEach(id=>selectedArIds.add(id));
+  else currentArListIds.forEach(id=>selectedArIds.delete(id));
+  renderAR();
+}
+function updateArBulkBar(){
+  const bar = document.getElementById('arBulkBar');
+  if(!bar) return;
+  if(selectedArIds.size>0){ bar.style.display='inline-flex'; document.getElementById('arBulkCount').textContent = selectedArIds.size; }
+  else bar.style.display = 'none';
+}
+async function bulkDeleteArInvoices(){
+  const ids = Array.from(selectedArIds);
+  if(ids.length===0) return;
+  if(!confirm(`Delete ${ids.length} invoice${ids.length>1?'s':''}? This cannot be undone.`)) return;
+  const now = Date.now();
+  for(const id of ids){
+    const inv = ALL_INVOICES.find(x=>x.id===id);
+    if(inv){ inv.deleted = true; inv.lastModified = now; await putInvoice(inv); }
+  }
+  selectedArIds.clear();
+  await reloadAll();
+  toast(`Deleted ${ids.length} invoice${ids.length>1?'s':''}`);
+}
 function renderAR(){
   const list = liveInvoices()
     .map(inv=>({inv, status: computeInvoiceStatus(inv), totals: invoiceTotals(inv)}))
     .filter(x=> x.status==='Sent' || x.status==='Overdue')
     .sort((a,b)=> a.inv.dueDate.localeCompare(b.inv.dueDate));
+  currentArListIds = list.map(x=>x.inv.id);
 
   const total = list.reduce((s,x)=>s+x.totals.total,0);
   const overdue = list.filter(x=>x.status==='Overdue');
@@ -1794,15 +1963,18 @@ function renderAR(){
   document.getElementById('arCurrent').textContent = fmt(currentTotal);
 
   const el = document.getElementById('arTable');
-  if(list.length===0){ el.innerHTML = `<div class="empty"><div class="big">✅</div>Nothing outstanding right now.</div>`; return; }
+  if(list.length===0){ el.innerHTML = `<div class="empty"><div class="big">✅</div>Nothing outstanding right now.</div>`; updateArBulkBar(); return; }
+  const allChecked = list.length>0 && list.every(x=>selectedArIds.has(x.inv.id));
   el.innerHTML = `<table><thead><tr>
+    <th><input type="checkbox" ${allChecked?'checked':''} onchange="toggleAllVisibleAr(this.checked)" title="Select all visible"></th>
     <th>#</th><th>Client</th><th>Due date</th><th>Days</th><th>Status</th><th style="text-align:right">Total</th><th></th>
   </tr></thead><tbody>
     ${list.map(({inv,status,totals})=>{
       const days = Math.round((new Date(inv.dueDate) - new Date(todayStr()))/86400000);
       const daysLabel = days<0 ? `${Math.abs(days)}d overdue` : (days===0 ? 'Due today' : `${days}d left`);
       return `<tr class="${status==='Overdue'?'overdue-row':''}">
-        <td><b>${escapeHtml(inv.number)}</b></td>
+        <td><input type="checkbox" ${selectedArIds.has(inv.id)?'checked':''} onchange="toggleArSelect('${inv.id}', this.checked)"></td>
+        <td><a href="#" onclick="event.preventDefault(); openInvoiceDetail('${inv.id}')" style="color:var(--navy);font-weight:700;text-decoration:none;">${escapeHtml(inv.number)}</a></td>
         <td>${escapeHtml(inv.clientSnapshot ? inv.clientSnapshot.name : '')}</td>
         <td>${inv.dueDate}</td>
         <td>${daysLabel}</td>
@@ -1815,6 +1987,7 @@ function renderAR(){
       </tr>`;
     }).join('')}
   </tbody></table>`;
+  updateArBulkBar();
 }
 
 /* ---------- Invoice PDF (print) & email ---------- */
@@ -2076,6 +2249,86 @@ async function gdriveUpload(payload){
   }
 }
 
+/* ---- Point-in-time snapshots (separate from the live sync file, never overwritten) ---- */
+const SNAPSHOT_PREFIX = 'apd_backup_';
+async function createDriveSnapshot(payload){
+  const filename = `${SNAPSHOT_PREFIX}${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+  const metadata = {name: filename, parents: ['appDataFolder']};
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
+  form.append('file', new Blob([JSON.stringify(payload)], {type:'application/json'}));
+  await gdriveApi('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {method:'POST', body: form});
+}
+async function listDriveSnapshots(){
+  const res = await gdriveApi(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name+contains+%27${SNAPSHOT_PREFIX}%27&fields=files(id,name,createdTime)&pageSize=100`);
+  const data = await res.json();
+  return (data.files||[]).sort((a,b)=> b.createdTime.localeCompare(a.createdTime)); // newest first
+}
+function isoWeekKey(d){
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (date.getUTCDay()+6)%7;
+  date.setUTCDate(date.getUTCDate()-dayNum+3);
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(),0,4));
+  const week = 1 + Math.round(((date-firstThursday)/86400000 - 3 + ((firstThursday.getUTCDay()+6)%7))/7);
+  return `${date.getUTCFullYear()}-W${week}`;
+}
+async function pruneDriveSnapshots(){
+  // Keep the 7 most recent snapshots outright, plus up to 4 more spaced roughly
+  // one-per-week beyond that — gives daily-ish recent history plus a longer tail
+  // without keeping every single sync's snapshot forever.
+  const files = await listDriveSnapshots();
+  if(files.length <= 7) return;
+  const keepIds = new Set(files.slice(0,7).map(f=>f.id));
+  const older = files.slice(7);
+  const weekBuckets = new Map();
+  older.forEach(f=>{
+    const key = isoWeekKey(new Date(f.createdTime));
+    if(!weekBuckets.has(key)) weekBuckets.set(key, f); // first = most recent in that week (already sorted desc)
+  });
+  Array.from(weekBuckets.values()).slice(0,4).forEach(f=>keepIds.add(f.id));
+  const toDelete = files.filter(f=>!keepIds.has(f.id));
+  for(const f of toDelete){
+    try{ await gdriveApi(`https://www.googleapis.com/drive/v3/files/${f.id}`, {method:'DELETE'}); }
+    catch(e){ console.warn('Snapshot prune failed for', f.name, e); }
+  }
+}
+async function restoreFromSnapshot(fileId){
+  try{
+    const data = await gdriveDownload(fileId);
+    const tCount = (data.transactions||[]).length, iCount = (data.invoices||[]).length, cCount = (data.clients||[]).length;
+    if(!confirm(`This backup contains ${tCount} transaction(s), ${iCount} invoice(s), ${cCount} client(s).\n\nRestoring will REPLACE all data currently on this device. Continue?`)) return;
+    await clearTxns(); await clearStore('invoices'); await clearStore('clients');
+    for(const t of data.transactions||[]) await putTxn(t);
+    for(const i of data.invoices||[]) await putInvoice(i);
+    for(const c of data.clients||[]) await putClient(c);
+    await reloadAll();
+    toast('Restored from backup');
+    document.getElementById('backupListWrap').style.display = 'none';
+  }catch(err){
+    alert('Could not restore this backup: ' + err.message);
+  }
+}
+async function openBackupBrowser(){
+  if(!gdriveAccessToken){ alert('Connect Google Drive first.'); return; }
+  const wrap = document.getElementById('backupListWrap');
+  const container = document.getElementById('backupList');
+  wrap.style.display = 'block';
+  container.innerHTML = '<p class="hint">Loading backups…</p>';
+  try{
+    const files = await listDriveSnapshots();
+    if(files.length===0){ container.innerHTML = '<p class="hint">No backups yet — they\'re created automatically each time you sync with Google Drive.</p>'; return; }
+    container.innerHTML = files.map(f=>{
+      const d = new Date(f.createdTime);
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;">
+        <span>${d.toLocaleString()}</span>
+        <button class="btn ghost sm" onclick="restoreFromSnapshot('${f.id}')">Restore this</button>
+      </div>`;
+    }).join('');
+  }catch(err){
+    container.innerHTML = `<p class="hint" style="color:var(--red);">Could not load backups: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
 async function syncWithDrive(manual){
   if(!gdriveAccessToken){ if(manual) alert('Connect Google Drive first.'); return; }
   if(gdriveSyncing) return;
@@ -2097,6 +2350,11 @@ async function syncWithDrive(manual){
     // Push merged local state back up so Drive always holds the latest combined snapshot
     const payload = {app:'apd-bookkeeping', version:2, exportedAt:new Date().toISOString(), transactions:ALL_TXNS, invoices:ALL_INVOICES, clients:ALL_CLIENTS};
     await gdriveUpload(payload);
+    // Also write a dated, never-overwritten snapshot for point-in-time recovery
+    try{
+      await createDriveSnapshot(payload);
+      await pruneDriveSnapshots();
+    }catch(e){ console.warn('Snapshot step failed (live sync still succeeded)', e); }
     gLS_set('gdrive_last_sync', String(Date.now()));
     initGDriveUI();
     setGDriveStatus('Connected','paid');
@@ -2437,6 +2695,7 @@ function csvEscape(v){ const s = String(v??''); if(/[",\n]/.test(s)) return '"' 
 function exportJson(){
   const payload = {app:'apd-bookkeeping', version:2, exportedAt:new Date().toISOString(), transactions:ALL_TXNS, invoices:ALL_INVOICES, clients:ALL_CLIENTS};
   downloadBlob(JSON.stringify(payload,null,2), `APD_Services_Bookkeeping_Sync_${new Date().toISOString().slice(0,10)}.json`, 'application/json');
+  gLS_set('last_local_export', String(Date.now()));
   toast('Sync file exported');
 }
 function downloadBlob(content, filename, mime){
@@ -2555,6 +2814,8 @@ function populateMappingSelects(){
     document.getElementById(id).innerHTML = opts;
   });
   document.getElementById('mapDesc2').innerHTML = '<option value="">(none)</option>' + opts;
+  document.getElementById('mapAccountType').innerHTML = '<option value="">(none)</option>' + opts;
+  document.getElementById('mapAccountNum').innerHTML = '<option value="">(none)</option>' + opts;
 
   const find = (rx)=> importHeaders.findIndex(h=>rx.test(h));
   const dateIdx = find(/date/i);
@@ -2563,10 +2824,14 @@ function populateMappingSelects(){
   const amtIdx = find(/cad\$|^amount$|amt/i);
   const debitIdx = find(/debit/i);
   const creditIdx = find(/credit/i);
+  const acctTypeIdx = find(/account\s*type/i);
+  const acctNumIdx = find(/account\s*(number|#)/i);
 
   if(dateIdx>=0) document.getElementById('mapDate').value = dateIdx;
   if(desc1Idx>=0) document.getElementById('mapDesc1').value = desc1Idx;
   if(desc2Idx>=0) document.getElementById('mapDesc2').value = desc2Idx;
+  if(acctTypeIdx>=0) document.getElementById('mapAccountType').value = acctTypeIdx;
+  if(acctNumIdx>=0) document.getElementById('mapAccountNum').value = acctNumIdx;
 
   if(amtIdx>=0){
     document.getElementById('mapAmountFormat').value = 'signed';
@@ -2599,6 +2864,10 @@ function applyImportMapping(){
   const desc1Col = parseInt(document.getElementById('mapDesc1').value);
   const desc2Val = document.getElementById('mapDesc2').value;
   const desc2Col = desc2Val === '' ? -1 : parseInt(desc2Val);
+  const acctTypeVal = document.getElementById('mapAccountType').value;
+  const acctTypeCol = acctTypeVal === '' ? -1 : parseInt(acctTypeVal);
+  const acctNumVal = document.getElementById('mapAccountNum').value;
+  const acctNumCol = acctNumVal === '' ? -1 : parseInt(acctNumVal);
   const mode = document.getElementById('mapAmountFormat').value;
   const amtCol = mode==='signed' ? parseInt(document.getElementById('mapAmountSigned').value) : -1;
   const debitCol = mode==='split' ? parseInt(document.getElementById('mapDebit').value) : -1;
@@ -2613,6 +2882,14 @@ function applyImportMapping(){
     let desc = (r[desc1Col]||'').trim();
     if(desc2Col>=0 && r[desc2Col] && r[desc2Col].trim()) desc += ' — ' + r[desc2Col].trim();
     if(!desc) desc = '(no description)';
+
+    let accountLabel = '';
+    if(acctTypeCol>=0 && r[acctTypeCol] && r[acctTypeCol].trim()) accountLabel = r[acctTypeCol].trim();
+    if(acctNumCol>=0 && r[acctNumCol] && r[acctNumCol].trim()){
+      const num = r[acctNumCol].trim();
+      const last4 = num.length>4 ? num.slice(-4) : num;
+      accountLabel = accountLabel ? `${accountLabel} ...${last4}` : `...${last4}`;
+    }
 
     let signed;
     if(mode==='signed'){
@@ -2631,7 +2908,7 @@ function applyImportMapping(){
     const duplicate = dupSet.has(sig);
 
     importCandidates.push({
-      date, description: desc, amount,
+      date, description: desc, amount, accountLabel,
       type: isIncome ? 'Income' : 'Expense',
       category: guessCategory(desc, isIncome),
       transfer, duplicate,
@@ -2656,7 +2933,8 @@ function renderImportPreview(){
     return `<tr>
       <td><input type="checkbox" ${c.include?'checked':''} onchange="importCandidates[${i}].include=this.checked"></td>
       <td>${c.date}</td>
-      <td style="max-width:260px;">${escapeHtml(c.description)}</td>
+      <td style="max-width:220px;">${escapeHtml(c.description)}</td>
+      <td style="font-size:12px;color:var(--ink-soft);">${escapeHtml(c.accountLabel||'')}</td>
       <td class="num">${fmt(c.amount)}</td>
       <td><select onchange="importCandidates[${i}].type=this.value; importCandidates[${i}].category=(this.value==='Income'?'Other Revenue':'Other Expense'); renderImportPreview();" style="padding:5px 6px;font-size:12.5px;">
         <option value="Income" ${c.type==='Income'?'selected':''}>Income</option>
@@ -2691,7 +2969,7 @@ async function confirmImport(){
       party: '',
       amount: c.amount, gst: 0, total: c.amount,
       payment: 'Bank Import',
-      notes: `Imported from bank CSV — "${c.description}"`,
+      notes: `Imported from bank CSV${c.accountLabel ? ' ['+c.accountLabel+']' : ''} — "${c.description}"`,
       receipt: null,
       invoiceId: null, invoiceNumber: null,
       lastModified: Date.now(),
@@ -2753,7 +3031,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v14 — 2026-07-26';
+const APP_VERSION = 'v15 — 2026-07-26';
 
 async function forceUpdateApp(){
   try{
@@ -2773,6 +3051,23 @@ async function forceUpdateApp(){
 }
 
 /* ---------- Boot ---------- */
+const LOCAL_BACKUP_NUDGE_DAYS = 14;
+const LOCAL_BACKUP_SNOOZE_DAYS = 3;
+function checkLocalBackupNudge(){
+  const last = parseInt(gLS_get('last_local_export')||'0', 10);
+  const snoozeUntil = parseInt(gLS_get('local_backup_snooze')||'0', 10);
+  const now = Date.now();
+  if(now < snoozeUntil) return;
+  const daysSince = last ? (now-last)/86400000 : Infinity;
+  if(daysSince >= LOCAL_BACKUP_NUDGE_DAYS){
+    document.getElementById('localBackupBanner').classList.add('show');
+  }
+}
+function snoozeLocalBackupNudge(){
+  gLS_set('local_backup_snooze', String(Date.now() + LOCAL_BACKUP_SNOOZE_DAYS*86400000));
+  document.getElementById('localBackupBanner').classList.remove('show');
+}
+
 async function reloadAll(){
   ALL_TXNS = await getAllTxns();
   ALL_INVOICES = await getAllInvoices();
@@ -2798,6 +3093,7 @@ async function reloadAll(){
 
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
   if(!isStandalone) document.getElementById('installBanner').classList.add('show');
+  checkLocalBackupNudge();
 
   if('serviceWorker' in navigator){
     try{ await navigator.serviceWorker.register('sw.js'); }catch(e){ console.warn('SW registration failed', e); }
