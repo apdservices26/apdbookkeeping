@@ -271,6 +271,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     <button data-view="ar">Receivable<span class="dot" id="arDot" style="display:none;">0</span></button>
     <button data-view="monthly">Monthly</button>
     <button data-view="gst">GST/HST</button>
+    <button data-view="cra">CRA Prep</button>
     <button data-view="settings">Settings</button>
   </nav>
 
@@ -399,6 +400,24 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     </div>
   </section>
 
+  <!-- CRA PREP -->
+  <section class="view" id="view-cra">
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">CRA Prep</h2>
+        <select id="craFY"></select>
+      </div>
+      <div class="seg" style="margin-bottom:16px;">
+        <button data-crareport="filing" class="active" onclick="setCraReportMode('filing')">Filing Prep</button>
+        <button data-crareport="accountant" onclick="setCraReportMode('accountant')">Accountant Discussion</button>
+      </div>
+      <div class="actions" style="margin-bottom:16px;">
+        <button class="btn secondary sm" onclick="printCraReport()">🖨️ Print / Save as PDF</button>
+      </div>
+      <div id="craReportBody"></div>
+    </div>
+  </section>
+
   <!-- SETTINGS -->
   <section class="view" id="view-settings">
     <div class="card">
@@ -481,6 +500,19 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
           <thead><tr><th>Category</th><th>Type</th><th>Notes</th></tr></thead>
           <tbody id="coaTable"></tbody>
         </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>GIFI code mapping <small>Used by the CRA Prep report. Best-effort starting codes — not verified against CRA's current GIFI list. Confirm with an accountant or CRA's T4012 guide, and correct anything below as needed.</small></h2>
+      <div class="table-wrap">
+        <table><thead><tr><th>Category</th><th style="width:110px;">GIFI code</th><th>Label</th></tr></thead>
+          <tbody id="gifiMapTable"></tbody>
+        </table>
+      </div>
+      <div class="actions" style="margin-top:12px;">
+        <button class="btn secondary sm" onclick="saveGifiMapFromForm()">Save mapping</button>
+        <button class="btn ghost sm" onclick="resetGifiMap()">Reset to defaults</button>
       </div>
     </div>
 
@@ -796,6 +828,37 @@ const SERVICE_TO_CATEGORY = {
   "Photography": "Product/Photography Revenue",
   "Other": "Other Revenue"
 };
+// Best-effort starting GIFI codes for a T2 corporate return. These are NOT
+// verified against the current CRA GIFI code list and should be confirmed
+// with an accountant or CRA's T4012 guide before relying on them for actual
+// filing. Fully editable in Settings — this is just a reasonable starting point.
+const GIFI_DEFAULTS = {
+  "Consulting Revenue": {code:"8000", label:"Sales of goods and services"},
+  "Product/Photography Revenue": {code:"8000", label:"Sales of goods and services"},
+  "Other Revenue": {code:"8089", label:"Other revenue"},
+  "Subcontractors": {code:"8340", label:"Subcontracts"},
+  "Software & SaaS Subscriptions": {code:"8811", label:"Office expenses"},
+  "Office Supplies": {code:"8811", label:"Office expenses"},
+  "Phone & Internet": {code:"8810", label:"Telephone and telecommunications"},
+  "Professional Fees (Accounting/Legal)": {code:"8860", label:"Professional fees (legal, accounting, etc.)"},
+  "Marketing & Advertising": {code:"8520", label:"Advertising and promotion"},
+  "Travel": {code:"9200", label:"Travel expenses"},
+  "Meals & Entertainment (50%)": {code:"8523", label:"Meals and entertainment (50% allowable)"},
+  "Insurance": {code:"8690", label:"Insurance"},
+  "Bank & Merchant Fees": {code:"8710", label:"Interest and bank charges"},
+  "Vehicle/Mileage": {code:"9281", label:"Motor vehicle expenses"},
+  "Salary/Wages": {code:"9060", label:"Salaries, wages and benefits"},
+  "Dividends": {code:"N/A", label:"Not a GIFI operating expense — dividends are paid from after-tax retained earnings, reported elsewhere on the T2 (not as a deductible expense). Flagged, not mapped."},
+  "Other Expense": {code:"9270", label:"Other expenses"},
+};
+function getGifiMap(){
+  try{
+    const stored = JSON.parse(gLS_get('gifi_map') || 'null');
+    if(stored) return Object.assign({}, GIFI_DEFAULTS, stored);
+  }catch(e){}
+  return Object.assign({}, GIFI_DEFAULTS);
+}
+function saveGifiMap(map){ gLS_set('gifi_map', JSON.stringify(map)); }
 const MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 const MONTH_NUM_TO_LABEL = {3:"Apr",4:"May",5:"Jun",6:"Jul",7:"Aug",8:"Sep",9:"Oct",10:"Nov",11:"Dec",0:"Jan",1:"Feb",2:"Mar"};
 
@@ -895,6 +958,7 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
     if(btn.dataset.view==='ar') renderAR();
     if(btn.dataset.view==='monthly') renderMonthly();
     if(btn.dataset.view==='gst') renderGst();
+    if(btn.dataset.view==='cra') renderCraReport();
     if(btn.dataset.view==='settings') renderClientsPreview();
   });
 });
@@ -1860,6 +1924,7 @@ const GDRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const GDRIVE_FILENAME = 'apd_bookkeeping_sync.json';
 let gdriveTokenClient = null;
 let gdriveAccessToken = null;
+let gdriveTokenExpiry = 0; // ms timestamp
 let gdriveFileId = null;
 let gdriveSyncing = false;
 
@@ -1887,7 +1952,7 @@ function saveGDriveClientId(){
 function forgetGDriveClientId(){
   if(!confirm('Remove the saved Client ID? You\'ll need to paste it again to reconnect.')) return;
   gLS_remove('gdrive_client_id');
-  gdriveAccessToken = null; gdriveTokenClient = null;
+  gdriveAccessToken = null; gdriveTokenClient = null; gdriveTokenExpiry = 0;
   stopAutoSyncTimer();
   initGDriveUI();
 }
@@ -1900,6 +1965,9 @@ function gdriveTokenCallback(resp){
     return;
   }
   gdriveAccessToken = resp.access_token;
+  // Google tokens are typically valid ~3600s; refresh 5 min early to be safe.
+  const expiresInSec = parseInt(resp.expires_in, 10) || 3600;
+  gdriveTokenExpiry = Date.now() + (expiresInSec - 300) * 1000;
   setGDriveStatus('Connected','paid');
   document.getElementById('gdriveSyncBtn').style.display = 'inline-flex';
   document.getElementById('gdriveConnectBtn').textContent = '🔗 Reconnect';
@@ -1912,9 +1980,15 @@ function startAutoSyncTimer(){
   if(gLS_get('gdrive_autosync') !== '1') return;
   gdriveAutoSyncTimer = setInterval(()=>{
     if(!gdriveTokenClient || gLS_get('gdrive_autosync')!=='1') { stopAutoSyncTimer(); return; }
-    gdrivePendingSyncManual = false;
-    gdriveTokenClient.requestAccessToken({prompt:''}); // silent refresh, then syncs via gdriveTokenCallback
-  }, 5 * 60 * 1000); // every 5 minutes
+    if(Date.now() < gdriveTokenExpiry){
+      // Existing token is still valid — sync directly, no re-auth call at all (no popup, no flash).
+      syncWithDrive(false);
+    } else {
+      // Token has actually expired — this is the only case that needs a fresh one.
+      gdrivePendingSyncManual = false;
+      gdriveTokenClient.requestAccessToken({prompt:''});
+    }
+  }, 5 * 60 * 1000); // check every 5 minutes; only re-authenticates when truly needed (~hourly)
 }
 function stopAutoSyncTimer(){
   if(gdriveAutoSyncTimer){ clearInterval(gdriveAutoSyncTimer); gdriveAutoSyncTimer = null; }
@@ -2102,6 +2176,244 @@ function renderGst(){
   document.getElementById('gstItc').textContent = fmt(itc);
   const netEl = document.getElementById('gstNet');
   netEl.textContent = fmt(net); netEl.className = 'value ' + (net>=0?'pos':'neg');
+}
+
+/* =====================================================
+   CRA PREP REPORTS
+   Two reports: "Filing Prep" (GIFI-grouped numbers + flags
+   to review before filing) and "Accountant Discussion"
+   (trends + plain-language questions worth asking).
+   Neither of these files anything or gives tax advice —
+   they organize your own numbers and flag what needs a
+   human decision.
+===================================================== */
+let craReportMode = 'filing';
+const ZERO_GST_EXEMPT_CATEGORIES = new Set(["Bank & Merchant Fees","Salary/Wages","Dividends","Insurance"]);
+const LARGE_TXN_THRESHOLD = 2000;
+
+function setCraReportMode(mode){
+  craReportMode = mode;
+  document.querySelectorAll('#view-cra .seg button').forEach(b=>b.classList.toggle('active', b.dataset.crareport===mode));
+  renderCraReport();
+}
+
+function ensureCraFyOptions(){
+  const sel = document.getElementById('craFY');
+  const cur = sel.value;
+  sel.innerHTML = fyList().map(fy=>`<option value="${fy}">${fyLabel(fy)}</option>`).join('');
+  if(cur && [...sel.options].some(o=>o.value===cur)) sel.value = cur; else sel.value = String(currentFy());
+  sel.onchange = renderCraReport;
+}
+
+function gifiGroupedTotals(fy, type){
+  const map = getGifiMap();
+  const txns = liveTxns().filter(t=>fyForDate(t.date)===fy && t.type===type);
+  const byCategory = {};
+  txns.forEach(t=>{ byCategory[t.category] = (byCategory[t.category]||0) + t.amount; });
+
+  const byCode = {}; // code -> {label, categories:[{category,amount}], total}
+  let excludedDividends = 0;
+  Object.entries(byCategory).forEach(([cat, amt])=>{
+    if(cat === 'Dividends'){ excludedDividends += amt; return; } // never counted as a GIFI operating expense
+    const g = map[cat] || {code:'—', label:cat};
+    if(!byCode[g.code]) byCode[g.code] = {label: g.label, categories: [], total: 0};
+    byCode[g.code].categories.push({category: cat, amount: amt});
+    byCode[g.code].total += amt;
+  });
+  const rows = Object.entries(byCode).map(([code, v])=>({code, ...v})).sort((a,b)=> a.code.localeCompare(b.code));
+  const grandTotal = rows.reduce((s,r)=>s+r.total, 0);
+  return {rows, grandTotal, excludedDividends};
+}
+
+function buildFlaggedItems(fy){
+  const txns = liveTxns().filter(t=>fyForDate(t.date)===fy);
+  const meals = txns.filter(t=>t.category==='Meals & Entertainment (50%)' && t.type==='Expense');
+  const mealsTotal = meals.reduce((s,t)=>s+t.amount,0);
+
+  const zeroGst = txns.filter(t=> t.type==='Expense' && t.amount>0 && t.gst===0 && !ZERO_GST_EXEMPT_CATEGORIES.has(t.category));
+  const large = txns.filter(t=> t.amount > LARGE_TXN_THRESHOLD);
+
+  return {mealsTotal, mealsEligible: mealsTotal*0.5, zeroGst, large};
+}
+
+function renderFilingPrepReportHtml(fy){
+  const income = gifiGroupedTotals(fy, 'Income');
+  const expense = gifiGroupedTotals(fy, 'Expense');
+  const flags = buildFlaggedItems(fy);
+  const txns = liveTxns().filter(t=>fyForDate(t.date)===fy);
+  const gstCollected = txns.filter(t=>t.type==='Income').reduce((s,t)=>s+t.gst,0);
+  const gstItc = txns.filter(t=>t.type==='Expense').reduce((s,t)=>s+t.gst,0);
+
+  const groupTable = (data, label) => `
+    <table style="margin-bottom:14px;"><thead><tr><th>GIFI code</th><th>Description</th><th>Your categories</th><th style="text-align:right">Total</th></tr></thead>
+    <tbody>
+      ${data.rows.map(r=>`<tr>
+        <td><b>${escapeHtml(r.code)}</b></td>
+        <td>${escapeHtml(r.label)}</td>
+        <td style="font-size:12px;color:var(--ink-soft);">${r.categories.map(c=>escapeHtml(c.category)).join(', ')}</td>
+        <td class="num">${fmt(r.total)}</td>
+      </tr>`).join('')}
+      <tr class="section-hdr"><td colspan="3">${label} total</td><td class="num">${fmt(data.grandTotal)}</td></tr>
+    </tbody></table>`;
+
+  return `
+    <div style="background:var(--amber-bg);border:1px solid #EBD199;color:var(--amber);padding:12px 14px;border-radius:9px;font-size:12.5px;margin-bottom:16px;">
+      <b>Before relying on this:</b> GIFI codes below are best-effort starting estimates (editable in Settings), not verified against CRA's current code list. This report organizes your own bookkeeping numbers — it does not file anything, calculate tax owing, or replace professional advice.
+    </div>
+
+    <h3 style="color:var(--navy);font-size:14px;">Revenue by GIFI code</h3>
+    ${groupTable(income, 'Revenue')}
+
+    <h3 style="color:var(--navy);font-size:14px;">Expenses by GIFI code</h3>
+    ${groupTable(expense, 'Expense')}
+    ${expense.excludedDividends>0 ? `<p class="hint" style="margin-top:-8px;margin-bottom:16px;">Dividends paid this year: <b>${fmt(expense.excludedDividends)}</b> — intentionally excluded from the expense total above; dividends aren't a deductible operating expense, they're reported separately on the T2 from after-tax retained earnings.</p>` : ''}
+
+    <h3 style="color:var(--navy);font-size:14px;">GST/HST cross-check</h3>
+    <div class="calc-row" style="margin-bottom:16px;">
+      <div>Collected on sales<br><b>${fmt(gstCollected)}</b></div>
+      <div>Paid on purchases (ITCs)<br><b>${fmt(gstItc)}</b></div>
+      <div>Net owing<br><b>${fmt(gstCollected-gstItc)}</b></div>
+    </div>
+    <p class="hint" style="margin-top:-10px;">Matches the GST/HST Summary tab for this fiscal year — shown here for a single-document reference.</p>
+
+    <h3 style="color:var(--navy);font-size:14px;">Flagged for review</h3>
+    <ul style="font-size:13.5px;line-height:1.8;">
+      ${flags.mealsTotal>0 ? `<li>Meals & Entertainment: <b>${fmt(flags.mealsTotal)}</b> total, of which <b>${fmt(flags.mealsEligible)}</b> (50%) is the typically-allowable portion — confirm current treatment before filing.</li>` : ''}
+      ${flags.zeroGst.length>0 ? `<li><b>${flags.zeroGst.length}</b> expense transaction(s) recorded with $0 GST/HST outside categories usually exempt — worth confirming these are genuinely tax-exempt/zero-rated rather than a data-entry gap. (See Transactions tab, filter by category, to review individually.)</li>` : ''}
+      ${flags.large.length>0 ? `<li><b>${flags.large.length}</b> transaction(s) over ${fmt(LARGE_TXN_THRESHOLD)} — worth double-checking categorization and that supporting documentation (invoice/receipt) is on file.</li>` : ''}
+      ${(flags.mealsTotal===0 && flags.zeroGst.length===0 && flags.large.length===0) ? `<li>No items flagged for this fiscal year.</li>` : ''}
+    </ul>
+  `;
+}
+
+function renderAccountantPrepReportHtml(fy){
+  const allFys = fyList().filter(f=>f<=fy).sort((a,b)=>b-a);
+  const prevFy = allFys.find(f=>f<fy);
+  const curTxns = liveTxns().filter(t=>fyForDate(t.date)===fy);
+  const revenue = curTxns.filter(t=>t.type==='Income').reduce((s,t)=>s+t.amount,0);
+  const expenses = curTxns.filter(t=>t.type==='Expense' && t.category!=='Dividends').reduce((s,t)=>s+t.amount,0);
+  const salary = curTxns.filter(t=>t.category==='Salary/Wages').reduce((s,t)=>s+t.amount,0);
+  const dividends = curTxns.filter(t=>t.category==='Dividends').reduce((s,t)=>s+t.amount,0);
+  const subcontractors = curTxns.filter(t=>t.category==='Subcontractors').reduce((s,t)=>s+t.amount,0);
+
+  let trendHtml = '';
+  if(prevFy!=null){
+    const prevTxns = liveTxns().filter(t=>fyForDate(t.date)===prevFy);
+    const prevRevenue = prevTxns.filter(t=>t.type==='Income').reduce((s,t)=>s+t.amount,0);
+    const prevExpenses = prevTxns.filter(t=>t.type==='Expense' && t.category!=='Dividends').reduce((s,t)=>s+t.amount,0);
+    const revChange = prevRevenue>0 ? ((revenue-prevRevenue)/prevRevenue*100) : null;
+    const expChange = prevExpenses>0 ? ((expenses-prevExpenses)/prevExpenses*100) : null;
+    trendHtml = `
+      <h3 style="color:var(--navy);font-size:14px;">Year-over-year (vs ${fyLabel(prevFy)})</h3>
+      <div class="calc-row" style="margin-bottom:16px;">
+        <div>Revenue<br><b>${fmt(revenue)}</b>${revChange!=null?` <span style="font-size:12px;color:var(--ink-soft);">(${revChange>=0?'+':''}${revChange.toFixed(0)}%)</span>`:''}</div>
+        <div>Expenses<br><b>${fmt(expenses)}</b>${expChange!=null?` <span style="font-size:12px;color:var(--ink-soft);">(${expChange>=0?'+':''}${expChange.toFixed(0)}%)</span>`:''}</div>
+      </div>`;
+  }
+
+  const byCat = {};
+  curTxns.filter(t=>t.type==='Expense' && t.category!=='Dividends').forEach(t=>{ byCat[t.category]=(byCat[t.category]||0)+t.amount; });
+  const catRows = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=>
+    `<tr><td>${escapeHtml(cat)}</td><td class="num">${fmt(amt)}</td><td class="num">${revenue>0?((amt/revenue)*100).toFixed(1):'—'}%</td></tr>`
+  ).join('');
+
+  const talkingPoints = [];
+  const flags = buildFlaggedItems(fy);
+  if(flags.mealsTotal>0) talkingPoints.push('Confirm current documentation/treatment requirements for the 50% Meals & Entertainment restriction.');
+  if(salary>0 && dividends>0) talkingPoints.push('Discuss this year\'s salary vs. dividend mix — is the split still sensible given this year\'s income and personal tax situation?');
+  if(flags.zeroGst.length>0) talkingPoints.push(`Review the ${flags.zeroGst.length} transaction(s) flagged with $0 GST/HST — confirm which are genuinely exempt vs. missed entries.`);
+  if(subcontractors>0) talkingPoints.push('Confirm T4A slip requirements for any subcontractor paid over the CRA reporting threshold this year.');
+  if(prevFy==null) talkingPoints.push('First fiscal year with data — confirm whether any pre-incorporation startup costs are eligible to claim.');
+  talkingPoints.push('Confirm the GIFI code mapping used in this report against current CRA guidance — codes shown are a starting estimate, not verified.');
+
+  return `
+    <div style="background:var(--paper);border:1px solid var(--line);padding:12px 14px;border-radius:9px;font-size:12.5px;margin-bottom:16px;color:var(--ink-soft);">
+      This is a briefing for a conversation with an accountant, not tax advice — it organizes your own numbers and lists questions worth asking. It doesn't recommend any course of action.
+    </div>
+    ${trendHtml}
+    <h3 style="color:var(--navy);font-size:14px;">Expenses as % of revenue</h3>
+    <table style="margin-bottom:16px;"><thead><tr><th>Category</th><th style="text-align:right">Amount</th><th style="text-align:right">% of revenue</th></tr></thead>
+      <tbody>${catRows || '<tr><td colspan="3" style="color:var(--ink-soft);">No expenses recorded yet.</td></tr>'}</tbody>
+    </table>
+    <h3 style="color:var(--navy);font-size:14px;">Salary vs. Dividends paid</h3>
+    <div class="calc-row" style="margin-bottom:16px;">
+      <div>Salary/Wages<br><b>${fmt(salary)}</b></div>
+      <div>Dividends<br><b>${fmt(dividends)}</b></div>
+    </div>
+    <h3 style="color:var(--navy);font-size:14px;">Questions worth bringing up</h3>
+    <ul style="font-size:13.5px;line-height:1.8;">${talkingPoints.map(p=>`<li>${escapeHtml(p)}</li>`).join('')}</ul>
+    <div class="field full" style="margin-top:16px;">
+      <label style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;font-weight:700;">Your own notes before the meeting</label>
+      <textarea rows="3" style="width:100%;margin-top:6px;border:1px solid var(--line);border-radius:8px;padding:10px;font-family:inherit;" placeholder="Add anything else you want to ask or remember…"></textarea>
+    </div>
+  `;
+}
+
+function renderCraReport(){
+  ensureCraFyOptions();
+  const fy = parseInt(document.getElementById('craFY').value);
+  document.getElementById('craReportBody').innerHTML = craReportMode==='filing'
+    ? renderFilingPrepReportHtml(fy)
+    : renderAccountantPrepReportHtml(fy);
+}
+
+function printCraReport(){
+  const fy = parseInt(document.getElementById('craFY').value);
+  const title = craReportMode==='filing' ? 'CRA Filing Prep Report' : 'Accountant Discussion Prep';
+  const body = craReportMode==='filing' ? renderFilingPrepReportHtml(fy) : renderAccountantPrepReportHtml(fy);
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(title)} — ${fyLabel(fy)}</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;color:#1B2430;margin:0;padding:36px;}
+    h1{color:#1F3864;font-size:20px;margin:0 0 4px;}
+    h3{margin-top:22px;}
+    table{width:100%;border-collapse:collapse;font-size:12.5px;}
+    th{background:#1F3864;color:#fff;text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;}
+    td{padding:7px 9px;border-bottom:1px solid #DCE3EC;}
+    .section-hdr td{background:#F5F7FA;font-weight:800;color:#1F3864;}
+    .num{text-align:right;font-variant-numeric:tabular-nums;}
+    .calc-row{display:flex;gap:16px;background:#F5F7FA;border:1px solid #DCE3EC;border-radius:8px;padding:12px 14px;font-size:13px;}
+    .calc-row div{flex:1;}
+    .hint{font-size:11.5px;color:#5B6B82;}
+    ul{font-size:13px;line-height:1.7;}
+    @media print{ body{padding:16px;} }
+  </style></head><body>
+    <h1>${escapeHtml(title)}</h1>
+    <p style="color:#5B6B82;font-size:12.5px;margin-top:0;">APD Services · 17911718 Canada Inc. · ${fyLabel(fy)} · Generated ${new Date().toLocaleDateString()}</p>
+    ${body}
+  </body></html>`;
+  const w = window.open('', '_blank');
+  if(!w){ alert('Please allow pop-ups to print or save this report.'); return; }
+  w.document.write(html);
+  w.document.close();
+  setTimeout(()=>{ w.focus(); w.print(); }, 400);
+}
+
+function renderGifiMapTable(){
+  const map = getGifiMap();
+  document.getElementById('gifiMapTable').innerHTML = CHART_OF_ACCOUNTS.map(c=>{
+    const g = map[c.category] || {code:'', label:''};
+    return `<tr>
+      <td>${escapeHtml(c.category)}</td>
+      <td><input type="text" class="gifi-code" data-cat="${escapeHtml(c.category)}" value="${escapeHtml(g.code)}" style="width:90px;padding:5px 6px;font-size:12.5px;"></td>
+      <td><input type="text" class="gifi-label" data-cat="${escapeHtml(c.category)}" value="${escapeHtml(g.label)}" style="width:100%;padding:5px 6px;font-size:12.5px;"></td>
+    </tr>`;
+  }).join('');
+}
+function saveGifiMapFromForm(){
+  const map = {};
+  document.querySelectorAll('#gifiMapTable .gifi-code').forEach(input=>{
+    const cat = input.dataset.cat;
+    const label = document.querySelector(`#gifiMapTable .gifi-label[data-cat="${CSS.escape(cat)}"]`).value.trim();
+    map[cat] = {code: input.value.trim(), label};
+  });
+  saveGifiMap(map);
+  toast('GIFI mapping saved');
+}
+function resetGifiMap(){
+  if(!confirm('Reset all GIFI codes back to the default starting values?')) return;
+  gLS_remove('gifi_map');
+  renderGifiMapTable();
+  toast('Reset to defaults');
 }
 
 /* ---------- Settings: Chart of Accounts ---------- */
@@ -2441,7 +2753,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v13 — 2026-07-26';
+const APP_VERSION = 'v14 — 2026-07-26';
 
 async function forceUpdateApp(){
   try{
@@ -2478,6 +2790,7 @@ async function reloadAll(){
   db = await openDb();
   populateCategorySelect(document.getElementById('txnCategory'), false, 'Income');
   renderCoa();
+  renderGifiMapTable();
   await reloadAll();
   initGDriveUI();
   document.getElementById('appVersionLabel').textContent = `Running: ${APP_VERSION}`;
