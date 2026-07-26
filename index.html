@@ -418,8 +418,19 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
           <button class="btn ghost sm" onclick="forgetGDriveClientId()">Change Client ID</button>
         </div>
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);font-weight:600;">
-          <input type="checkbox" id="gdriveAutoSync" style="width:auto;" onchange="saveAutoSyncPref()"> Auto-sync when the app opens and closes
+          <input type="checkbox" id="gdriveAutoSync" style="width:auto;" onchange="saveAutoSyncPref()"> Auto-sync every 5 minutes while the app is open (plus on open/close)
         </label>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+          <label style="font-size:13px;color:var(--ink-soft);font-weight:600;">Also sync every</label>
+          <select id="gdriveSyncInterval" onchange="saveSyncIntervalPref()" style="padding:6px 10px;font-size:13px;">
+            <option value="0">Off — only on open/close</option>
+            <option value="5">5 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+          </select>
+          <span style="font-size:13px;color:var(--ink-soft);">while the app is open</span>
+        </div>
         <p class="hint" id="gdriveLastSync" style="margin-top:8px;"></p>
       </div>
     </div>
@@ -1877,10 +1888,44 @@ function forgetGDriveClientId(){
   if(!confirm('Remove the saved Client ID? You\'ll need to paste it again to reconnect.')) return;
   gLS_remove('gdrive_client_id');
   gdriveAccessToken = null; gdriveTokenClient = null;
+  stopAutoSyncTimer();
   initGDriveUI();
 }
+let gdriveAutoSyncTimer = null;
+let gdrivePendingSyncManual = true;
+
+function gdriveTokenCallback(resp){
+  if(resp.error){
+    if(gdrivePendingSyncManual){ setGDriveStatus('Connection failed','overdue'); alert('Google Drive connection failed: ' + resp.error); }
+    return;
+  }
+  gdriveAccessToken = resp.access_token;
+  setGDriveStatus('Connected','paid');
+  document.getElementById('gdriveSyncBtn').style.display = 'inline-flex';
+  document.getElementById('gdriveConnectBtn').textContent = '🔗 Reconnect';
+  syncWithDrive(gdrivePendingSyncManual);
+  startAutoSyncTimer();
+}
+
+function startAutoSyncTimer(){
+  stopAutoSyncTimer();
+  if(gLS_get('gdrive_autosync') !== '1') return;
+  gdriveAutoSyncTimer = setInterval(()=>{
+    if(!gdriveTokenClient || gLS_get('gdrive_autosync')!=='1') { stopAutoSyncTimer(); return; }
+    gdrivePendingSyncManual = false;
+    gdriveTokenClient.requestAccessToken({prompt:''}); // silent refresh, then syncs via gdriveTokenCallback
+  }, 5 * 60 * 1000); // every 5 minutes
+}
+function stopAutoSyncTimer(){
+  if(gdriveAutoSyncTimer){ clearInterval(gdriveAutoSyncTimer); gdriveAutoSyncTimer = null; }
+}
+
 function saveAutoSyncPref(){
-  gLS_set('gdrive_autosync', document.getElementById('gdriveAutoSync').checked ? '1' : '0');
+  const on = document.getElementById('gdriveAutoSync').checked;
+  gLS_set('gdrive_autosync', on ? '1' : '0');
+  if(on && gdriveAccessToken) startAutoSyncTimer();
+  else stopAutoSyncTimer();
+  toast(on ? 'Auto-sync enabled — will sync every 5 minutes while the app is open' : 'Auto-sync disabled');
 }
 
 function loadGIS(){
@@ -1909,16 +1954,10 @@ async function connectGDrive(){
       gdriveTokenClient = google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: GDRIVE_SCOPE,
-        callback: async (resp)=>{
-          if(resp.error){ setGDriveStatus('Connection failed','overdue'); alert('Google Drive connection failed: ' + resp.error); return; }
-          gdriveAccessToken = resp.access_token;
-          setGDriveStatus('Connected','paid');
-          document.getElementById('gdriveSyncBtn').style.display = 'inline-flex';
-          document.getElementById('gdriveConnectBtn').textContent = '🔗 Reconnect';
-          await syncWithDrive(true);
-        }
+        callback: gdriveTokenCallback
       });
     }
+    gdrivePendingSyncManual = true;
     setGDriveStatus('Connecting…','sent');
     gdriveTokenClient.requestAccessToken({prompt: gdriveAccessToken ? '' : 'consent'});
   }catch(err){
@@ -2402,7 +2441,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v12 — 2026-07-26';
+const APP_VERSION = 'v13 — 2026-07-26';
 
 async function forceUpdateApp(){
   try{
@@ -2458,15 +2497,9 @@ async function reloadAll(){
       gdriveTokenClient = google.accounts.oauth2.initTokenClient({
         client_id: gLS_get('gdrive_client_id'),
         scope: GDRIVE_SCOPE,
-        callback: async (resp)=>{
-          if(resp.error) return;
-          gdriveAccessToken = resp.access_token;
-          setGDriveStatus('Connected','paid');
-          document.getElementById('gdriveSyncBtn').style.display = 'inline-flex';
-          document.getElementById('gdriveConnectBtn').textContent = '🔗 Reconnect';
-          await syncWithDrive(false);
-        }
+        callback: gdriveTokenCallback
       });
+      gdrivePendingSyncManual = false;
       gdriveTokenClient.requestAccessToken({prompt:''}); // silent — no popup if already granted
     }catch(e){ console.warn('Silent Drive sync skipped', e); }
   }
