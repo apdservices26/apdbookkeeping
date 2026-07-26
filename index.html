@@ -520,8 +520,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
             <label class="btn secondary sm" style="cursor:pointer;">📷 Take photo
               <input type="file" accept="image/*" capture="environment" style="display:none" onchange="handleReceiptFile(event)">
             </label>
-            <label class="btn secondary sm" style="cursor:pointer;">🖼️ Upload image
-              <input type="file" accept="image/*" style="display:none" onchange="handleReceiptFile(event)">
+            <label class="btn secondary sm" style="cursor:pointer;">🖼️ Upload image or PDF
+              <input type="file" accept="image/*,application/pdf" style="display:none" onchange="handleReceiptFile(event)">
             </label>
           </div>
           <div id="receiptPreviewWrap" style="display:none;margin-top:10px;position:relative;max-width:220px;">
@@ -530,7 +530,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
               <button type="button" class="btn secondary sm" onclick="scanReceipt()">🔍 Scan & autofill</button>
               <button type="button" class="btn danger sm" onclick="removeReceiptDraft()">Remove</button>
             </div>
-            <p class="hint" style="margin-top:4px;">Scanning needs an internet connection the first time (loads the OCR engine, then works offline that session). Always double-check the auto-filled amounts.</p>
+            <p class="hint" style="margin-top:4px;">Accepts photos or PDF invoices/receipts (first page only for multi-page PDFs). Scanning needs an internet connection the first time (loads the OCR/PDF engines, then works offline that session). Always double-check the auto-filled amounts.</p>
           </div>
           <p class="hint" id="receiptHint" style="margin-top:4px;"></p>
         </div>
@@ -840,6 +840,35 @@ function showReceiptPreview(dataUrl){
 function removeReceiptDraft(){ showReceiptPreview(null); }
 function viewReceiptFull(){ if(receiptDraft && receiptDraft.dataUrl) window.open(receiptDraft.dataUrl, '_blank'); }
 
+let pdfjsLoadPromise = null;
+function loadPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve();
+  if(pdfjsLoadPromise) return pdfjsLoadPromise;
+  pdfjsLoadPromise = new Promise((resolve,reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = ()=>{
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      resolve();
+    };
+    s.onerror = ()=>{ pdfjsLoadPromise = null; reject(new Error('Could not load the PDF engine. Check your internet connection and try again.')); };
+    document.head.appendChild(s);
+  });
+  return pdfjsLoadPromise;
+}
+
+async function pdfFileToImageDataUrl(file){
+  await loadPdfJs();
+  const buf = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({data: buf}).promise;
+  const page = await pdf.getPage(1); // first page only — most receipts/invoices are single-page
+  const viewport = page.getViewport({scale: 2});
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width; canvas.height = viewport.height;
+  await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+  return {dataUrl: canvas.toDataURL('image/jpeg', 0.9), pageCount: pdf.numPages};
+}
+
 /* ---------- Receipt scanning (OCR autofill) ---------- */
 let tesseractLoadPromise = null;
 function loadTesseract(){
@@ -955,21 +984,39 @@ async function scanReceipt(){
 function handleReceiptFile(evt){
   const file = evt.target.files[0]; evt.target.value = '';
   if(!file) return;
-  if(!file.type.startsWith('image/')){ alert('Please choose an image file.'); return; }
+
+  if(file.type === 'application/pdf'){
+    document.getElementById('receiptHint').textContent = 'Converting PDF…';
+    pdfFileToImageDataUrl(file).then(({dataUrl, pageCount})=>{
+      compressDataUrl(dataUrl, (finalUrl)=>{
+        showReceiptPreview(finalUrl);
+        if(pageCount > 1) document.getElementById('receiptHint').textContent = `This PDF has ${pageCount} pages — only page 1 was used.`;
+      });
+    }).catch(err=>{
+      document.getElementById('receiptHint').textContent = '';
+      alert('Could not read this PDF: ' + err.message);
+    });
+    return;
+  }
+
+  if(!file.type.startsWith('image/')){ alert('Please choose an image or PDF file.'); return; }
   document.getElementById('receiptHint').textContent = 'Processing image…';
   const img = new Image(); const reader = new FileReader();
-  reader.onload = (e)=>{
-    img.onload = ()=>{
-      const maxDim = 1400;
-      let {width, height} = img;
-      if(width > maxDim || height > maxDim){ const scale = maxDim / Math.max(width, height); width = Math.round(width*scale); height = Math.round(height*scale); }
-      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
-      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-      showReceiptPreview(canvas.toDataURL('image/jpeg', 0.82));
-    };
-    img.src = e.target.result;
-  };
+  reader.onload = (e)=>{ img.onload = ()=>{ compressImageEl(img, showReceiptPreview); }; img.src = e.target.result; };
   reader.readAsDataURL(file);
+}
+function compressImageEl(img, callback){
+  const maxDim = 1400;
+  let {width, height} = img;
+  if(width > maxDim || height > maxDim){ const scale = maxDim / Math.max(width, height); width = Math.round(width*scale); height = Math.round(height*scale); }
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+  canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+  callback(canvas.toDataURL('image/jpeg', 0.82));
+}
+function compressDataUrl(dataUrl, callback){
+  const img = new Image();
+  img.onload = ()=> compressImageEl(img, callback);
+  img.src = dataUrl;
 }
 
 /* ---------- Transaction Modal ---------- */
