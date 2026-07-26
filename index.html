@@ -482,7 +482,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     </div>
   </section>
 
-  <p class="footer-note">APD Services Bookkeeping · data stored locally on this device · not synced to the cloud</p>
+  <p class="footer-note">APD Services Bookkeeping · data stored locally on this device · not synced to the cloud · <span id="footerVersion"></span></p>
 </div>
 
 <!-- Transaction Modal -->
@@ -2071,7 +2071,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v9 — 2026-07-26';
+const APP_VERSION = 'v10 — 2026-07-26';
 
 async function forceUpdateApp(){
   try{
@@ -2111,6 +2111,7 @@ async function reloadAll(){
   await reloadAll();
   initGDriveUI();
   document.getElementById('appVersionLabel').textContent = `Running: ${APP_VERSION}`;
+  document.getElementById('footerVersion').textContent = APP_VERSION;
 
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
   if(!isStandalone) document.getElementById('installBanner').classList.add('show');

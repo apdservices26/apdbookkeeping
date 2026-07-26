@@ -1,4 +1,4 @@
-const CACHE = "apd-bookkeeping-v9";
+const CACHE = "apd-bookkeeping-v10";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./favicon.png", "./icon-192.png", "./icon-512.png", "./logo_white.png"];
 
 self.addEventListener("install", (event) => {
