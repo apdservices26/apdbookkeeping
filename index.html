@@ -721,6 +721,12 @@ let db;
 let ALL_TXNS = [];
 let ALL_INVOICES = [];
 let ALL_CLIENTS = [];
+// ALL_* arrays include soft-deleted "tombstone" records (needed so deletions
+// propagate correctly through sync). Use these live* helpers anywhere the
+// UI displays or calculates from data — they filter tombstones out.
+function liveTxns(){ return ALL_TXNS.filter(t=>!t.deleted); }
+function liveInvoices(){ return ALL_INVOICES.filter(i=>!i.deleted); }
+function liveClients(){ return ALL_CLIENTS.filter(c=>!c.deleted); }
 
 /* ---------- IndexedDB setup ---------- */
 function openDb(){
@@ -776,8 +782,8 @@ function fyForDate(dateStr){
 function fyLabel(fy){ return `FY ${fy}–${String(fy+1).slice(2)} (Apr 1 ${fy} – Mar 31 ${fy+1})`; }
 function currentFy(){ return fyForDate(new Date().toISOString().slice(0,10)); }
 function fyList(){
-  const fys = new Set(ALL_TXNS.map(t=>fyForDate(t.date)));
-  ALL_INVOICES.forEach(i=>fys.add(fyForDate(i.issueDate)));
+  const fys = new Set(liveTxns().map(t=>fyForDate(t.date)));
+  liveInvoices().forEach(i=>fys.add(fyForDate(i.issueDate)));
   fys.add(currentFy());
   return Array.from(fys).sort((a,b)=>b-a);
 }
@@ -1087,7 +1093,11 @@ async function saveTxn(){
 }
 async function removeTxn(id){
   if(!confirm('Delete this transaction? This cannot be undone.')) return;
-  await deleteTxn(id);
+  const t = ALL_TXNS.find(x=>x.id===id);
+  if(!t) return;
+  t.deleted = true;
+  t.lastModified = Date.now();
+  await putTxn(t);
   await reloadAll();
   toast('Transaction deleted');
 }
@@ -1109,7 +1119,7 @@ function invoiceTotals(inv){
 function renderDashboard(){
   const fy = currentFy();
   document.getElementById('fyPill').textContent = fyLabel(fy);
-  const txns = ALL_TXNS.filter(t=>fyForDate(t.date)===fy);
+  const txns = liveTxns().filter(t=>fyForDate(t.date)===fy);
 
   const revenue = txns.filter(t=>t.type==='Income').reduce((s,t)=>s+t.amount,0);
   const expenses = txns.filter(t=>t.type==='Expense').reduce((s,t)=>s+t.amount,0);
@@ -1125,7 +1135,7 @@ function renderDashboard(){
   const gstEl = document.getElementById('statGst');
   gstEl.textContent = fmt(gstNet); gstEl.className = 'value ' + (gstNet>=0?'pos':'neg');
 
-  const outstanding = ALL_INVOICES.filter(i=>computeInvoiceStatus(i)!=='Paid' && i.status!=='Draft');
+  const outstanding = liveInvoices().filter(i=>computeInvoiceStatus(i)!=='Paid' && i.status!=='Draft');
   const owed = outstanding.reduce((s,i)=>s+invoiceTotals(i).total,0);
   const overdueCount = outstanding.filter(i=>computeInvoiceStatus(i)==='Overdue').length;
   document.getElementById('statOwed').textContent = fmt(owed);
@@ -1145,7 +1155,7 @@ function renderDashboard(){
         ${sorted.map(([cat,amt])=>`<tr><td>${escapeHtml(cat)}</td><td class="num">${fmt(amt)}</td></tr>`).join('')}
       </tbody></table>`;
 
-  const recent = [...ALL_TXNS].sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0,8);
+  const recent = [...liveTxns()].sort((a,b)=> b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0,8);
   document.getElementById('recentTxns').innerHTML = recent.length===0
     ? `<div class="empty"><div class="big">🗒️</div>No transactions yet. Click "Add transaction" to log your first entry.</div>`
     : renderTxnTable(recent, false);
@@ -1166,7 +1176,7 @@ function renderTransactions(){
   const type = document.getElementById('fType').value;
   const cat = document.getElementById('fCategory').value;
   const fy = document.getElementById('fFY').value;
-  let list = [...ALL_TXNS];
+  let list = [...liveTxns()];
   if(search) list = list.filter(t=> (t.description||'').toLowerCase().includes(search) || (t.party||'').toLowerCase().includes(search) || (t.notes||'').toLowerCase().includes(search));
   if(type) list = list.filter(t=>t.type===type);
   if(cat) list = list.filter(t=>t.category===cat);
@@ -1208,7 +1218,7 @@ function editTxn(id){ const t = ALL_TXNS.find(x=>x.id===id); if(t) openTxnModal(
 ===================================================== */
 function populateClientSelect(){
   const sel = document.getElementById('invClient');
-  sel.innerHTML = '<option value="">Select a client…</option>' + ALL_CLIENTS.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  sel.innerHTML = '<option value="">Select a client…</option>' + liveClients().map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
 }
 function openClientsModal(focusForm){
   populateClientSelect();
@@ -1260,10 +1270,14 @@ function editClient(id){
   document.getElementById('cliCancelBtn').style.display = 'inline-flex';
 }
 async function removeClient(id){
-  const used = ALL_INVOICES.some(i=>i.clientId===id);
+  const used = liveInvoices().some(i=>i.clientId===id);
   if(used && !confirm("This client has invoices on file. Deleting the client won't affect existing invoices (they keep a snapshot of the client details). Continue?")) return;
   if(!used && !confirm('Delete this client?')) return;
-  await deleteClient(id);
+  const c = ALL_CLIENTS.find(x=>x.id===id);
+  if(!c) return;
+  c.deleted = true;
+  c.lastModified = Date.now();
+  await putClient(c);
   await reloadAll();
   renderClientsTable();
   populateClientSelect();
@@ -1272,9 +1286,9 @@ async function removeClient(id){
 function renderClientsTable(){
   const el = document.getElementById('clientsTable');
   if(!el) return;
-  if(ALL_CLIENTS.length===0){ el.innerHTML = `<div class="empty">No clients yet. Add one above.</div>`; return; }
+  if(liveClients().length===0){ el.innerHTML = `<div class="empty">No clients yet. Add one above.</div>`; return; }
   el.innerHTML = `<table><thead><tr><th>Name</th><th>Email</th><th>Service line</th><th></th></tr></thead><tbody>
-    ${ALL_CLIENTS.map(c=>`<tr>
+    ${liveClients().map(c=>`<tr>
       <td><b>${escapeHtml(c.name)}</b></td>
       <td>${escapeHtml(c.email)||'<span style="color:var(--ink-soft)">—</span>'}</td>
       <td><span class="badge ${c.serviceLine==='Photography'?'photography':(c.serviceLine==='Other'?'other':'consulting')}">${c.serviceLine||'Consulting'}</span></td>
@@ -1288,9 +1302,9 @@ function renderClientsTable(){
 function renderClientsPreview(){
   const el = document.getElementById('clientsPreview');
   if(!el) return;
-  if(ALL_CLIENTS.length===0){ el.innerHTML = `<div class="empty">No clients yet.</div>`; return; }
+  if(liveClients().length===0){ el.innerHTML = `<div class="empty">No clients yet.</div>`; return; }
   el.innerHTML = `<table><thead><tr><th>Name</th><th>Email</th><th>Service line</th></tr></thead><tbody>
-    ${ALL_CLIENTS.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.email)||'—'}</td><td>${escapeHtml(c.serviceLine||'Consulting')}</td></tr>`).join('')}
+    ${liveClients().map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.email)||'—'}</td><td>${escapeHtml(c.serviceLine||'Consulting')}</td></tr>`).join('')}
   </tbody></table>`;
 }
 
@@ -1486,7 +1500,10 @@ async function deleteInvoiceConfirm(id){
   if(!inv) return;
   if(inv.status!=='Draft' && !confirm(`Invoice ${inv.number} is ${computeInvoiceStatus(inv)}, not a draft. Delete anyway?`)) return;
   if(inv.status==='Draft' && !confirm(`Delete draft invoice ${inv.number}?`)) return;
-  await deleteInvoice(id); await reloadAll();
+  inv.deleted = true;
+  inv.lastModified = Date.now();
+  await putInvoice(inv);
+  await reloadAll();
   toast('Invoice deleted');
 }
 function editInvoiceOpen(id){
@@ -1558,7 +1575,7 @@ function renderInvoices(){
   const serviceF = document.getElementById('iService').value;
   const fyF = document.getElementById('iFY').value;
 
-  let list = ALL_INVOICES.map(inv=>({inv, status: computeInvoiceStatus(inv), totals: invoiceTotals(inv)}));
+  let list = liveInvoices().map(inv=>({inv, status: computeInvoiceStatus(inv), totals: invoiceTotals(inv)}));
   if(search) list = list.filter(x=> x.inv.number.toLowerCase().includes(search) || (x.inv.clientSnapshot && x.inv.clientSnapshot.name||'').toLowerCase().includes(search));
   if(statusF) list = list.filter(x=>x.status===statusF);
   if(serviceF) list = list.filter(x=>x.inv.serviceLine===serviceF);
@@ -1593,7 +1610,7 @@ function renderInvoices(){
 
 /* Accounts Receivable */
 function renderAR(){
-  const list = ALL_INVOICES
+  const list = liveInvoices()
     .map(inv=>({inv, status: computeInvoiceStatus(inv), totals: invoiceTotals(inv)}))
     .filter(x=> x.status==='Sent' || x.status==='Overdue')
     .sort((a,b)=> a.inv.dueDate.localeCompare(b.inv.dueDate));
@@ -1904,7 +1921,7 @@ function renderMonthly(){
   ensureFyOptions(sel);
   const fy = parseInt(sel.value);
   sel.onchange = renderMonthly;
-  const txns = ALL_TXNS.filter(t=>fyForDate(t.date)===fy);
+  const txns = liveTxns().filter(t=>fyForDate(t.date)===fy);
   const data = {};
   CHART_OF_ACCOUNTS.forEach(c=>{ data[c.category] = {}; MONTH_ORDER.forEach(m=>data[c.category][m]=0); });
   txns.forEach(t=>{
@@ -1945,7 +1962,7 @@ function renderGst(){
   ensureFyOptions(sel);
   const fy = parseInt(sel.value);
   sel.onchange = renderGst;
-  const txns = ALL_TXNS.filter(t=>fyForDate(t.date)===fy);
+  const txns = liveTxns().filter(t=>fyForDate(t.date)===fy);
   const collected = txns.filter(t=>t.type==='Income').reduce((s,t)=>s+t.gst,0);
   const itc = txns.filter(t=>t.type==='Expense').reduce((s,t)=>s+t.gst,0);
   const net = collected - itc;
@@ -1965,7 +1982,7 @@ function renderCoa(){
 /* ---------- Export / Import ---------- */
 function exportCsv(){
   const headers = ["Date","Type","Category","Description","Client/Vendor","Amount (Excl. GST/HST)","GST/HST","Total (Incl. GST/HST)","Payment Method","Notes","Invoice #"];
-  const rows = [...ALL_TXNS].sort((a,b)=>a.date.localeCompare(b.date)).map(t=>[
+  const rows = [...liveTxns()].sort((a,b)=>a.date.localeCompare(b.date)).map(t=>[
     t.date, t.type, t.category, t.description, t.party, t.amount, t.gst, t.total, t.payment, t.notes, t.invoiceNumber||''
   ]);
   const csv = [headers, ...rows].map(r=> r.map(csvEscape).join(',')).join('\r\n');
@@ -2031,15 +2048,20 @@ async function importJson(evt, mode){
   evt.target.value = '';
 }
 async function clearAllData(){
-  if(!confirm('This will permanently delete ALL transactions on this device. This cannot be undone. Continue?')) return;
+  if(!confirm('This will permanently delete ALL transactions on this device (and remove them next time you sync elsewhere). This cannot be undone. Continue?')) return;
   if(!confirm('Are you absolutely sure? Consider exporting a sync file first.')) return;
-  await clearTxns(); await reloadAll();
+  const now = Date.now();
+  for(const t of ALL_TXNS){ if(!t.deleted){ t.deleted = true; t.lastModified = now; await putTxn(t); } }
+  await reloadAll();
   toast('All transactions deleted');
 }
 async function clearAllInvoices(){
-  if(!confirm('This will permanently delete ALL invoices and clients on this device (transactions stay intact). Continue?')) return;
+  if(!confirm('This will permanently delete ALL invoices and clients on this device (and remove them next time you sync elsewhere). Transactions stay intact. Continue?')) return;
   if(!confirm('Are you absolutely sure? Consider exporting a sync file first.')) return;
-  await clearStore('invoices'); await clearStore('clients'); await reloadAll();
+  const now = Date.now();
+  for(const i of ALL_INVOICES){ if(!i.deleted){ i.deleted = true; i.lastModified = now; await putInvoice(i); } }
+  for(const c of ALL_CLIENTS){ if(!c.deleted){ c.deleted = true; c.lastModified = now; await putClient(c); } }
+  await reloadAll();
   toast('All invoices and clients deleted');
 }
 
