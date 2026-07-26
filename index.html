@@ -304,6 +304,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
       <div class="toolbar">
         <h2 style="margin:0;">All transactions</h2>
         <div class="actions">
+          <button class="btn secondary sm" onclick="openImportModal()">⬆ Import bank CSV</button>
           <button class="btn secondary sm" onclick="exportCsv()">⬇ Export CSV</button>
           <button class="btn sm" onclick="openTxnModal()">+ Add transaction</button>
         </div>
@@ -421,6 +422,11 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
         </label>
         <p class="hint" id="gdriveLastSync" style="margin-top:8px;"></p>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Bank transaction import <small>Bring in transactions from a CSV exported by your bank's online banking.</small></h2>
+      <button class="btn secondary sm" onclick="openImportModal()">⬆ Import bank CSV</button>
     </div>
 
     <div class="card">
@@ -660,6 +666,65 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeClientsModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Bank CSV Modal -->
+<div class="overlay" id="importOverlay">
+  <div class="modal wide" style="max-width:980px;">
+    <div class="modal-head">
+      <h3>Import bank CSV</h3>
+      <button class="close-x" onclick="closeImportModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="importStep1">
+        <p class="hint" style="margin-bottom:10px;">Export a transaction CSV from your bank's online banking, then upload it here.</p>
+        <label class="btn secondary sm" style="cursor:pointer;">📄 Choose CSV file
+          <input type="file" accept=".csv,text/csv" style="display:none" onchange="handleImportFile(event)">
+        </label>
+        <p class="hint" id="importFileHint" style="margin-top:8px;"></p>
+      </div>
+
+      <div id="importStep2" style="display:none;">
+        <div class="card" style="box-shadow:none;border:1px dashed var(--line);margin-bottom:16px;">
+          <h2 style="margin-bottom:12px;">Column mapping</h2>
+          <div class="form-grid">
+            <div class="field"><label>Date column</label><select id="mapDate"></select></div>
+            <div class="field"><label>Description column</label><select id="mapDesc1"></select></div>
+            <div class="field"><label>Description column 2 (optional)</label><select id="mapDesc2"><option value="">(none)</option></select></div>
+            <div class="field"><label>Amount format</label>
+              <select id="mapAmountFormat" onchange="toggleAmountMode()">
+                <option value="signed">Single signed column (negative = money out)</option>
+                <option value="split">Separate Debit / Credit columns</option>
+              </select>
+            </div>
+            <div class="field" id="mapAmountSignedWrap"><label>Amount column</label><select id="mapAmountSigned"></select></div>
+            <div class="field" id="mapAmountDebitWrap" style="display:none;"><label>Debit column (money out)</label><select id="mapDebit"></select></div>
+            <div class="field" id="mapAmountCreditWrap" style="display:none;"><label>Credit column (money in)</label><select id="mapCredit"></select></div>
+          </div>
+          <button class="btn secondary sm" style="margin-top:12px;" onclick="applyImportMapping()">Apply mapping & preview</button>
+        </div>
+
+        <div id="importPreviewWrap" style="display:none;">
+          <div class="toolbar" style="margin-bottom:10px;">
+            <h2 style="margin:0;">Preview <small id="importSummary" style="display:block;font-weight:500;color:var(--ink-soft);"></small></h2>
+            <div class="actions">
+              <button class="btn ghost sm" onclick="toggleAllImportRows(true)">Select all</button>
+              <button class="btn ghost sm" onclick="toggleAllImportRows(false)">Select none</button>
+            </div>
+          </div>
+          <div class="table-wrap" style="max-height:420px;overflow-y:auto;">
+            <table id="importPreviewTable"><thead><tr>
+              <th></th><th>Date</th><th>Description</th><th style="text-align:right">Amount</th><th>Type</th><th>Category</th><th>Flags</th>
+            </tr></thead><tbody id="importPreviewBody"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="closeImportModal()">Cancel</button>
+      <button class="btn" id="importConfirmBtn" style="display:none;" onclick="confirmImport()">Import selected</button>
     </div>
   </div>
 </div>
@@ -2043,6 +2108,250 @@ async function upsertMerge(name, list, existingAll){
   }
   return {added, updated, skipped};
 }
+/* =====================================================
+   BANK CSV IMPORT
+===================================================== */
+let importHeaders = [];
+let importRows = [];
+let importCandidates = [];
+
+function parseCSV(text){
+  text = text.replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){ if(text[i+1] === '"'){ field += '"'; i++; } else { inQuotes = false; } }
+      else field += c;
+    } else {
+      if(c === '"') inQuotes = true;
+      else if(c === ','){ row.push(field); field=''; }
+      else if(c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+      else if(c === '\r'){ /* skip */ }
+      else field += c;
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r=> r.some(f=>f.trim()!==''));
+}
+
+function parseImportDate(str){
+  if(!str) return null;
+  str = str.trim();
+  let m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // M/D/YYYY (North American bank exports)
+  if(m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+  const d = new Date(str);
+  if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+  return null;
+}
+
+const TRANSFER_PATTERNS = [/\btransfer\b/i, /\be-?transfer\b/i, /payment\s*-\s*thank you/i, /pai\s*ement\s*-\s*merci/i, /\bbill payment\b/i];
+function isLikelyTransfer(desc){ return TRANSFER_PATTERNS.some(rx=>rx.test(desc)); }
+
+const CATEGORY_KEYWORDS = [
+  [/anthropic|claude|microsoft|adobe|google workspace|aws|amazon web|github|netflix|spotify|software|saas|subscription|dropbox|zoom/i, "Software & SaaS Subscriptions"],
+  [/annual fee|monthly fee|service charge|nsf|overdraft|interest|bank fee/i, "Bank & Merchant Fees"],
+  [/virgin|telus|bell canada|rogers|sasktel|freedom mobile|shaw|wireless|phone|internet/i, "Phone & Internet"],
+  [/best buy|staples|amazon\.ca|amazon\.com|office depot|supplies/i, "Office Supplies"],
+  [/insurance|intact|sun life|manulife/i, "Insurance"],
+  [/legal|law office|barrister|accountant|accounting|bookkeep/i, "Professional Fees (Accounting/Legal)"],
+  [/facebook ads|meta ads|google ads|advertising|marketing|canva/i, "Marketing & Advertising"],
+  [/restaurant|cafe|coffee|tim hortons|starbucks|mcdonald|a&w|subway/i, "Meals & Entertainment (50%)"],
+  [/hotel|air canada|westjet|flight|uber|lyft|travel|expedia|airbnb/i, "Travel"],
+  [/gas|fuel|petro|esso|shell|husky|cabs|taxi|parking/i, "Vehicle/Mileage"],
+  [/payroll|salary|wages/i, "Salary/Wages"],
+  [/dividend/i, "Dividends"],
+];
+function guessCategory(desc, isIncome){
+  if(isIncome) return "Other Revenue";
+  for(const [rx, cat] of CATEGORY_KEYWORDS){ if(rx.test(desc)) return cat; }
+  return "Other Expense";
+}
+
+function openImportModal(){
+  importHeaders = []; importRows = []; importCandidates = [];
+  document.getElementById('importStep1').style.display = 'block';
+  document.getElementById('importStep2').style.display = 'none';
+  document.getElementById('importPreviewWrap').style.display = 'none';
+  document.getElementById('importConfirmBtn').style.display = 'none';
+  document.getElementById('importFileHint').textContent = '';
+  document.getElementById('importOverlay').classList.add('open');
+}
+function closeImportModal(){ document.getElementById('importOverlay').classList.remove('open'); }
+
+function handleImportFile(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const parsed = parseCSV(e.target.result);
+    if(parsed.length < 2){ alert('Could not find any data rows in this file.'); return; }
+    importHeaders = parsed[0].map(h=>h.trim());
+    importRows = parsed.slice(1);
+    document.getElementById('importFileHint').textContent = `Loaded ${importRows.length} rows from "${file.name}".`;
+    populateMappingSelects();
+    document.getElementById('importStep2').style.display = 'block';
+  };
+  reader.readAsText(file);
+}
+
+function populateMappingSelects(){
+  const opts = importHeaders.map((h,i)=>`<option value="${i}">${escapeHtml(h)}</option>`).join('');
+  ['mapDate','mapDesc1','mapAmountSigned','mapDebit','mapCredit'].forEach(id=>{
+    document.getElementById(id).innerHTML = opts;
+  });
+  document.getElementById('mapDesc2').innerHTML = '<option value="">(none)</option>' + opts;
+
+  const find = (rx)=> importHeaders.findIndex(h=>rx.test(h));
+  const dateIdx = find(/date/i);
+  const desc1Idx = find(/description\s*1|^description$|desc/i);
+  const desc2Idx = find(/description\s*2/i);
+  const amtIdx = find(/cad\$|^amount$|amt/i);
+  const debitIdx = find(/debit/i);
+  const creditIdx = find(/credit/i);
+
+  if(dateIdx>=0) document.getElementById('mapDate').value = dateIdx;
+  if(desc1Idx>=0) document.getElementById('mapDesc1').value = desc1Idx;
+  if(desc2Idx>=0) document.getElementById('mapDesc2').value = desc2Idx;
+
+  if(amtIdx>=0){
+    document.getElementById('mapAmountFormat').value = 'signed';
+    document.getElementById('mapAmountSigned').value = amtIdx;
+    toggleAmountMode();
+  } else if(debitIdx>=0 && creditIdx>=0){
+    document.getElementById('mapAmountFormat').value = 'split';
+    document.getElementById('mapDebit').value = debitIdx;
+    document.getElementById('mapCredit').value = creditIdx;
+    toggleAmountMode();
+  }
+}
+function toggleAmountMode(){
+  const mode = document.getElementById('mapAmountFormat').value;
+  document.getElementById('mapAmountSignedWrap').style.display = mode==='signed' ? 'block' : 'none';
+  document.getElementById('mapAmountDebitWrap').style.display = mode==='split' ? 'block' : 'none';
+  document.getElementById('mapAmountCreditWrap').style.display = mode==='split' ? 'block' : 'none';
+}
+
+function buildDupSignatureSet(){
+  const set = new Set();
+  liveTxns().forEach(t=>{
+    set.add(`${t.date}|${t.amount.toFixed(2)}`);
+  });
+  return set;
+}
+
+function applyImportMapping(){
+  const dateCol = parseInt(document.getElementById('mapDate').value);
+  const desc1Col = parseInt(document.getElementById('mapDesc1').value);
+  const desc2Val = document.getElementById('mapDesc2').value;
+  const desc2Col = desc2Val === '' ? -1 : parseInt(desc2Val);
+  const mode = document.getElementById('mapAmountFormat').value;
+  const amtCol = mode==='signed' ? parseInt(document.getElementById('mapAmountSigned').value) : -1;
+  const debitCol = mode==='split' ? parseInt(document.getElementById('mapDebit').value) : -1;
+  const creditCol = mode==='split' ? parseInt(document.getElementById('mapCredit').value) : -1;
+
+  const dupSet = buildDupSignatureSet();
+  importCandidates = [];
+
+  importRows.forEach(r=>{
+    const dateRaw = r[dateCol] || '';
+    const date = parseImportDate(dateRaw);
+    let desc = (r[desc1Col]||'').trim();
+    if(desc2Col>=0 && r[desc2Col] && r[desc2Col].trim()) desc += ' — ' + r[desc2Col].trim();
+    if(!desc) desc = '(no description)';
+
+    let signed;
+    if(mode==='signed'){
+      signed = parseFloat((r[amtCol]||'0').replace(/[^0-9.\-]/g,''));
+    } else {
+      const debit = parseFloat((r[debitCol]||'0').replace(/[^0-9.\-]/g,'')) || 0;
+      const credit = parseFloat((r[creditCol]||'0').replace(/[^0-9.\-]/g,'')) || 0;
+      signed = credit - debit;
+    }
+    if(!date || isNaN(signed) || signed===0) return; // skip unparseable/empty rows
+
+    const isIncome = signed > 0;
+    const amount = Math.abs(signed);
+    const transfer = isLikelyTransfer(desc);
+    const sig = `${date}|${amount.toFixed(2)}`;
+    const duplicate = dupSet.has(sig);
+
+    importCandidates.push({
+      date, description: desc, amount,
+      type: isIncome ? 'Income' : 'Expense',
+      category: guessCategory(desc, isIncome),
+      transfer, duplicate,
+      include: !transfer && !duplicate,
+    });
+  });
+
+  renderImportPreview();
+}
+
+function renderImportPreview(){
+  const body = document.getElementById('importPreviewBody');
+  const dupCount = importCandidates.filter(c=>c.duplicate).length;
+  const transferCount = importCandidates.filter(c=>c.transfer).length;
+  document.getElementById('importSummary').textContent =
+    `${importCandidates.length} rows found · ${dupCount} possible duplicates · ${transferCount} possible transfers (all pre-unchecked — review before including)`;
+
+  body.innerHTML = importCandidates.map((c,i)=>{
+    const flags = [];
+    if(c.duplicate) flags.push('<span class="badge overdue">Possible duplicate</span>');
+    if(c.transfer) flags.push('<span class="badge draft">Possible transfer</span>');
+    return `<tr>
+      <td><input type="checkbox" ${c.include?'checked':''} onchange="importCandidates[${i}].include=this.checked"></td>
+      <td>${c.date}</td>
+      <td style="max-width:260px;">${escapeHtml(c.description)}</td>
+      <td class="num">${fmt(c.amount)}</td>
+      <td><select onchange="importCandidates[${i}].type=this.value; importCandidates[${i}].category=(this.value==='Income'?'Other Revenue':'Other Expense'); renderImportPreview();" style="padding:5px 6px;font-size:12.5px;">
+        <option value="Income" ${c.type==='Income'?'selected':''}>Income</option>
+        <option value="Expense" ${c.type==='Expense'?'selected':''}>Expense</option>
+      </select></td>
+      <td><select onchange="importCandidates[${i}].category=this.value;" style="padding:5px 6px;font-size:12.5px;">
+        ${CHART_OF_ACCOUNTS.filter(ca=>ca.type===c.type).map(ca=>`<option value="${escapeHtml(ca.category)}" ${ca.category===c.category?'selected':''}>${escapeHtml(ca.category)}</option>`).join('')}
+      </select></td>
+      <td>${flags.join(' ')}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('importPreviewWrap').style.display = 'block';
+  document.getElementById('importConfirmBtn').style.display = importCandidates.length ? 'inline-flex' : 'none';
+}
+function toggleAllImportRows(val){
+  importCandidates.forEach(c=>c.include=val);
+  renderImportPreview();
+}
+
+async function confirmImport(){
+  const selected = importCandidates.filter(c=>c.include);
+  if(selected.length===0){ alert('No rows selected to import.'); return; }
+  if(!confirm(`Import ${selected.length} transaction(s)?`)) return;
+  for(const c of selected){
+    const txn = {
+      id: uid('txn'),
+      date: c.date,
+      type: c.type,
+      category: c.category,
+      description: c.description,
+      party: '',
+      amount: c.amount, gst: 0, total: c.amount,
+      payment: 'Bank Import',
+      notes: `Imported from bank CSV — "${c.description}"`,
+      receipt: null,
+      invoiceId: null, invoiceNumber: null,
+      lastModified: Date.now(),
+    };
+    await putTxn(txn);
+  }
+  await reloadAll();
+  closeImportModal();
+  toast(`Imported ${selected.length} transaction(s)`);
+}
+
 async function importJson(evt, mode){
   mode = mode || 'merge';
   const file = evt.target.files[0];
@@ -2093,7 +2402,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v11 — 2026-07-26';
+const APP_VERSION = 'v12 — 2026-07-26';
 
 async function forceUpdateApp(){
   try{
