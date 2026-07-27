@@ -280,6 +280,9 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 
 <div id="app">
 
+  <div id="dbIssueBanner" style="display:none;background:var(--red-bg);border:1px solid #E8B4B4;color:var(--red);padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:16px;font-weight:600;">
+  </div>
+
   <div id="installBanner">
     <span>📲 Install this app on your device: use your browser menu → <b>"Add to Home screen"</b> (Android) or <b>"Install app"</b> (Windows/Chrome) for offline, app-like access.</span>
     <button class="btn ghost sm" onclick="document.getElementById('installBanner').classList.remove('show')">Dismiss</button>
@@ -1099,6 +1102,8 @@ function livePayslips(){ return ALL_PAYSLIPS.filter(p=>!p.deleted); }
 function openDb(){
   return new Promise((resolve, reject)=>{
     const req = indexedDB.open("apd_bookkeeping", 3);
+    let settled = false;
+
     req.onupgradeneeded = (e)=>{
       const d = e.target.result;
       if(!d.objectStoreNames.contains("transactions")){
@@ -1124,11 +1129,46 @@ function openDb(){
         store.createIndex("payDate", "payDate");
       }
     };
-    req.onsuccess = (e)=>resolve(e.target.result);
-    req.onerror = (e)=>reject(e.target.error);
+
+    req.onsuccess = (e)=>{
+      settled = true;
+      const d = e.target.result;
+      // If ANOTHER tab/window later needs a newer version of this database,
+      // this connection closes itself automatically instead of blocking that
+      // upgrade forever — this is what was missing and caused sync/init to
+      // silently hang with "Cannot read properties of undefined" errors.
+      d.onversionchange = ()=>{ d.close(); showDbStaleBanner(); };
+      resolve(d);
+    };
+
+    req.onerror = (e)=>{ settled = true; reject(e.target.error); };
+
+    // This tab/window is itself blocking an upgrade (an older connection is
+    // still open elsewhere) — surface this clearly instead of hanging.
+    req.onblocked = ()=>{
+      console.warn('IndexedDB upgrade blocked by another open tab/window.');
+      showDbBlockedBanner();
+    };
+
+    // Safety net: if nothing has resolved within 8s (e.g. a genuinely stuck
+    // blocked state), fail loudly rather than leaving init() hung forever.
+    setTimeout(()=>{
+      if(!settled){ settled = true; reject(new Error('Database did not open in time — likely blocked by another open tab of this app.')); }
+    }, 8000);
   });
 }
-function store(name, mode="readonly"){ return db.transaction(name, mode).objectStore(name); }
+function showDbBlockedBanner(){
+  const el = document.getElementById('dbIssueBanner');
+  if(el){ el.textContent = '⚠️ This app is open in another tab/window and needs to update its local database. Please close other tabs/windows running this app on this device, then reload this page.'; el.style.display = 'block'; }
+}
+function showDbStaleBanner(){
+  const el = document.getElementById('dbIssueBanner');
+  if(el){ el.textContent = '⚠️ This tab is using an outdated version of the local database (likely updated in another tab). Please reload this page.'; el.style.display = 'block'; }
+}
+function store(name, mode="readonly"){
+  if(!db) throw new Error('Local database is not ready yet — try reloading the page. If this keeps happening, close other tabs/windows of this app on this device first.');
+  return db.transaction(name, mode).objectStore(name);
+}
 function getAll(name){ return new Promise((res,rej)=>{ const r=store(name).getAll(); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 function putRecord(name, obj){ return new Promise((res,rej)=>{ const r=store(name,"readwrite").put(obj); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
 function deleteRecord(name, id){ return new Promise((res,rej)=>{ const r=store(name,"readwrite").delete(id); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); }); }
@@ -3759,7 +3799,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v17 — 2026-07-27';
+const APP_VERSION = 'v18 — 2026-07-27';
 
 async function forceUpdateApp(){
   try{
@@ -3814,7 +3854,17 @@ async function reloadAll(){
 }
 
 (async function init(){
-  db = await openDb();
+  try{
+    db = await openDb();
+  }catch(err){
+    console.error('Database failed to open:', err);
+    const el = document.getElementById('dbIssueBanner');
+    if(el){
+      el.textContent = '⚠️ Could not open the local database: ' + err.message + ' — try closing other tabs/windows of this app on this device, then reload. If that doesn\'t help, use Settings → Check for updates (once the app loads) or a fresh browser tab.';
+      el.style.display = 'block';
+    }
+    return; // stop here — nothing below this works without a database connection
+  }
   populateCategorySelect(document.getElementById('txnCategory'), false, 'Income');
   renderCoa();
   renderGifiMapTable();
