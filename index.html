@@ -64,7 +64,7 @@ header.top{
 nav.tabs{
   display:flex;gap:4px;background:var(--card);border:1px solid var(--line);
   border-radius:var(--radius);padding:5px;margin-bottom:20px;
-  box-shadow:var(--shadow);overflow-x:auto;
+  box-shadow:var(--shadow);flex-wrap:wrap;position:relative;
 }
 nav.tabs button{
   flex:1;min-width:100px;border:none;background:transparent;padding:10px 12px;
@@ -77,6 +77,20 @@ nav.tabs button .dot{
   display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--red);
   color:#fff;font-size:10px;font-weight:800;margin-left:5px;padding:0 4px;vertical-align:middle;
 }
+.tab-group{position:relative;flex:1;min-width:110px;}
+.tab-group-toggle{width:100%;}
+.tab-group-toggle.group-active{background:var(--navy);color:#fff;}
+.tab-group-menu{
+  display:none;flex-direction:column;position:absolute;top:100%;left:0;margin-top:4px;
+  background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);
+  z-index:30;min-width:190px;overflow:hidden;
+}
+.tab-group-menu.open{display:flex;}
+.tab-group-menu button{
+  flex:none;width:100%;text-align:left;padding:10px 14px;border-radius:0;font-size:13px;
+}
+.tab-group-menu button.active{background:var(--navy);color:#fff;}
+.tab-group-menu button:hover{background:var(--paper);}
 
 .view{display:none;}
 .view.active{display:block;animation:fade .2s ease;}
@@ -282,11 +296,22 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   <nav class="tabs">
     <button data-view="dashboard" class="active">Dashboard</button>
     <button data-view="transactions">Transactions</button>
-    <button data-view="invoices">Invoices</button>
-    <button data-view="ar">Receivable<span class="dot" id="arDot" style="display:none;">0</span></button>
-    <button data-view="monthly">Monthly</button>
-    <button data-view="gst">GST/HST</button>
-    <button data-view="cra">CRA Prep</button>
+    <div class="tab-group">
+      <button type="button" class="tab-group-toggle" onclick="toggleTabGroup(this)">Invoicing ▾<span class="dot" id="arDot" style="display:none;">0</span></button>
+      <div class="tab-group-menu">
+        <button data-view="invoices">Invoices</button>
+        <button data-view="ar">Receivable</button>
+      </div>
+    </div>
+    <div class="tab-group">
+      <button type="button" class="tab-group-toggle" onclick="toggleTabGroup(this)">Reports ▾</button>
+      <div class="tab-group-menu">
+        <button data-view="monthly">Monthly Summary</button>
+        <button data-view="gst">GST/HST</button>
+        <button data-view="cra">CRA Prep</button>
+      </div>
+    </div>
+    <button data-view="payroll">Payroll</button>
     <button data-view="settings">Settings</button>
   </nav>
 
@@ -438,6 +463,25 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     </div>
   </section>
 
+  <!-- PAYROLL -->
+  <section class="view" id="view-payroll">
+    <div class="card">
+      <div class="toolbar">
+        <h2 style="margin:0;">Payroll <small style="display:block;font-weight:500;color:var(--ink-soft);">Estimates only — see the notice on each payslip before remitting anything to CRA.</small></h2>
+        <div class="actions">
+          <button class="btn secondary sm" onclick="openEmployeesModal()">👤 Manage people</button>
+          <button class="btn sm" onclick="openPayslipModal()">+ New payslip</button>
+        </div>
+      </div>
+      <div class="filters">
+        <select id="payrollEmpFilter" onchange="renderPayroll()"><option value="">All people</option></select>
+        <select id="payrollYearFilter" onchange="renderPayroll()"></select>
+      </div>
+      <div class="grid stats" id="payrollYtdCards" style="margin-bottom:18px;"></div>
+      <div id="payslipsTable" class="table-wrap"></div>
+    </div>
+  </section>
+
   <!-- SETTINGS -->
   <section class="view" id="view-settings">
     <div class="card">
@@ -460,6 +504,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
           <input type="checkbox" id="gdriveAutoSync" style="width:auto;" onchange="saveAutoSyncPref()"> Auto-sync every 5 minutes while the app is open (plus on open/close)
         </label>
         <p class="hint" id="gdriveLastSync" style="margin-top:8px;"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>This device's name <small>Used to label backups and sync files so you can tell which device they came from — e.g. "Amit's Phone" or "Office PC". Set this separately on each device.</small></h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="text" id="deviceLabelInput" placeholder="e.g. Amit's Galaxy S24 FE" style="flex:1;min-width:200px;border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:14px;">
+        <button class="btn secondary sm" onclick="saveDeviceLabel()">Save</button>
       </div>
     </div>
 
@@ -537,6 +589,15 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     </div>
 
     <div class="card">
+      <h2>Payroll rate settings <small>Used by the Payroll tab's estimates. CRA publishes new CPP/EI/tax figures every fall — update these when that happens so estimates don't go stale.</small></h2>
+      <div id="payrollRatesForm"></div>
+      <div class="actions" style="margin-top:12px;">
+        <button class="btn secondary sm" onclick="savePayrollRatesFromForm()">Save rates</button>
+        <button class="btn ghost sm" onclick="resetPayrollRatesConfirm()">Reset to built-in defaults</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>App version <small>If something looks out of date after I ship a fix, use this to force-load the latest version.</small></h2>
       <p class="hint" id="appVersionLabel" style="margin-bottom:10px;"></p>
       <button class="btn secondary sm" onclick="forceUpdateApp()">🔄 Check for updates</button>
@@ -551,7 +612,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     </div>
   </section>
 
-  <p class="footer-note">APD Services Bookkeeping · data stored locally on this device · not synced to the cloud · <span id="footerVersion"></span></p>
+  <p class="footer-note">APD Services Bookkeeping · data stored locally on this device, with optional Google Drive sync · <span id="footerVersion"></span></p>
 </div>
 
 <!-- Transaction Modal -->
@@ -798,6 +859,106 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   </div>
 </div>
 
+<!-- Employees Modal -->
+<div class="overlay" id="employeesOverlay">
+  <div class="modal wide">
+    <div class="modal-head">
+      <h3>People (payroll)</h3>
+      <button class="close-x" onclick="closeEmployeesModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="card" style="margin-bottom:16px;box-shadow:none;border:1px dashed var(--line);">
+        <h2 id="empFormTitle" style="margin-bottom:12px;">Add employee</h2>
+        <form id="employeeForm" class="form-grid">
+          <input type="hidden" id="empId">
+          <div class="field"><label>Name</label><input type="text" id="empName" required></div>
+          <div class="field"><label>Role</label>
+            <select id="empRole"><option value="Director">Director</option><option value="Employee">Employee</option><option value="Contractor">Contractor</option></select>
+          </div>
+          <div class="field"><label>Default pay frequency</label>
+            <select id="empPayFreq">
+              <option value="Monthly">Monthly</option>
+              <option value="Semi-monthly">Semi-monthly</option>
+              <option value="Biweekly">Biweekly</option>
+              <option value="Weekly">Weekly</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <label style="display:flex;align-items:center;gap:8px;font-weight:500;font-size:13.5px;color:var(--ink);text-transform:none;">
+              <input type="checkbox" id="empEiExempt" style="width:auto;"> EI-exempt (confirm with CRA/accountant before checking — controlling shareholders are often exempt, but this isn't assumed automatically)
+            </label>
+          </div>
+        </form>
+        <div class="actions" style="margin-top:10px;">
+          <button class="btn sm" onclick="saveEmployee()">Save</button>
+          <button class="btn ghost sm" id="empCancelBtn" style="display:none;" onclick="resetEmployeeForm()">Cancel edit</button>
+        </div>
+      </div>
+      <div id="employeesTable" class="table-wrap"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeEmployeesModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Payslip Modal -->
+<div class="overlay" id="payslipOverlay">
+  <div class="modal wide">
+    <div class="modal-head">
+      <h3 id="payslipModalTitle">New payslip</h3>
+      <button class="close-x" onclick="closePayslipModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <form id="payslipForm" class="form-grid">
+        <input type="hidden" id="paySlipId">
+        <div class="field full">
+          <label>Person</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <select id="paySlipEmployee" style="flex:1;min-width:160px;" onchange="onPayslipEmployeeChange()" required></select>
+            <button type="button" class="btn secondary sm" onclick="openEmployeesModal()">+ Manage people</button>
+          </div>
+        </div>
+        <div class="field"><label>Pay frequency</label>
+          <select id="paySlipFrequency" onchange="recalcPayslipPreview()">
+            <option value="Monthly">Monthly</option>
+            <option value="Semi-monthly">Semi-monthly</option>
+            <option value="Biweekly">Biweekly</option>
+            <option value="Weekly">Weekly</option>
+          </select>
+        </div>
+        <div class="field"><label>Pay date</label><input type="date" id="paySlipPayDate" required onchange="recalcPayslipPreview()"></div>
+        <div class="field"><label>Period start</label><input type="date" id="paySlipPeriodStart" required></div>
+        <div class="field"><label>Period end</label><input type="date" id="paySlipPeriodEnd" required></div>
+        <div class="field full"><label>Gross pay (this period)</label><input type="number" step="0.01" min="0" id="paySlipGross" required oninput="recalcPayslipPreview()"></div>
+
+        <div class="field full" id="paySlipCalcWrap" style="display:none;">
+          <div id="paySlipCalc" class="calc-row" style="flex-wrap:wrap;">
+            <div>CPP (tier 1)<br><b id="paySlipCpp1Display">$0.00</b></div>
+            <div>CPP2 (tier 2)<br><b id="paySlipCpp2Display">$0.00</b></div>
+            <div>CPP total<br><b id="paySlipCppTotalDisplay">$0.00</b></div>
+            <div>EI<br><b id="paySlipEiDisplay">$0.00</b></div>
+            <div>Federal tax<br><b id="paySlipFedTaxDisplay">$0.00</b></div>
+            <div>Saskatchewan tax<br><b id="paySlipProvTaxDisplay">$0.00</b></div>
+            <div>Tax total<br><b id="paySlipTaxTotalDisplay">$0.00</b></div>
+            <div>Net pay<br><b id="paySlipNetPayDisplay" style="color:var(--green);">$0.00</b></div>
+          </div>
+          <div class="calc-row" style="margin-top:10px;background:var(--gray-bg);">
+            <div>Employer CPP match<br><b id="paySlipEmployerCppDisplay">$0.00</b></div>
+            <div>Employer EI (1.4×)<br><b id="paySlipEmployerEiDisplay">$0.00</b></div>
+          </div>
+          <p class="hint" style="margin-top:8px;color:var(--amber);">These are estimates based on current payroll rate settings. Confirm with CRA's PDOC tool or your accountant before treating these as final — figures are calculated fresh each time you save, based on gross pay entered above.</p>
+        </div>
+      </form>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="closePayslipModal()">Cancel</button>
+      <button class="btn" onclick="savePayslip()">Save payslip</button>
+    </div>
+  </div>
+</div>
+
 <!-- Mark Paid Modal -->
 <div class="overlay" id="paidOverlay">
   <div class="modal">
@@ -885,6 +1046,37 @@ function getGifiMap(){
   return Object.assign({}, GIFI_DEFAULTS);
 }
 function saveGifiMap(map){ gLS_set('gifi_map', JSON.stringify(map)); }
+
+/* =====================================================
+   PAYROLL RATES — verified against CRA/Government of
+   Saskatchewan published 2026 figures at time of writing.
+   These change every year (CRA publishes new numbers each
+   fall) — fully editable in Settings so this never goes
+   silently stale.
+===================================================== */
+const PAYROLL_RATES_DEFAULT = {
+  year: 2026,
+  lastVerified: '2026-07-26',
+  cppBasicExemption: 3500,
+  cppRate1: 0.0595, cppYMPE: 74600, cppMax1: 4230.45,
+  cppRate2: 0.04, cppYAMPE: 85000, cppMax2: 416,
+  eiRate: 0.0163, eiMaxInsurable: 68900, eiMaxPremium: 1123.07,
+  eiEmployerMultiplier: 1.4,
+  fedBrackets: [[0,58523,0.14],[58523,117045,0.205],[117045,181440,0.26],[181440,258482,0.29],[258482,null,0.33]],
+  fedBPA: 16452,
+  skBrackets: [[0,54532,0.105],[54532,155805,0.125],[155805,null,0.145]],
+  skBPA: 20381,
+};
+function getPayrollRates(){
+  try{
+    const stored = JSON.parse(gLS_get('payroll_rates') || 'null');
+    if(stored) return stored;
+  }catch(e){}
+  return JSON.parse(JSON.stringify(PAYROLL_RATES_DEFAULT));
+}
+function savePayrollRates(rates){ gLS_set('payroll_rates', JSON.stringify(rates)); }
+function resetPayrollRates(){ gLS_remove('payroll_rates'); }
+
 const MONTH_ORDER = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb","Mar"];
 const MONTH_NUM_TO_LABEL = {3:"Apr",4:"May",5:"Jun",6:"Jul",7:"Aug",8:"Sep",9:"Oct",10:"Nov",11:"Dec",0:"Jan",1:"Feb",2:"Mar"};
 
@@ -892,17 +1084,21 @@ let db;
 let ALL_TXNS = [];
 let ALL_INVOICES = [];
 let ALL_CLIENTS = [];
+let ALL_EMPLOYEES = [];
+let ALL_PAYSLIPS = [];
 // ALL_* arrays include soft-deleted "tombstone" records (needed so deletions
 // propagate correctly through sync). Use these live* helpers anywhere the
 // UI displays or calculates from data — they filter tombstones out.
 function liveTxns(){ return ALL_TXNS.filter(t=>!t.deleted); }
 function liveInvoices(){ return ALL_INVOICES.filter(i=>!i.deleted); }
 function liveClients(){ return ALL_CLIENTS.filter(c=>!c.deleted); }
+function liveEmployees(){ return ALL_EMPLOYEES.filter(e=>!e.deleted); }
+function livePayslips(){ return ALL_PAYSLIPS.filter(p=>!p.deleted); }
 
 /* ---------- IndexedDB setup ---------- */
 function openDb(){
   return new Promise((resolve, reject)=>{
-    const req = indexedDB.open("apd_bookkeeping", 2);
+    const req = indexedDB.open("apd_bookkeeping", 3);
     req.onupgradeneeded = (e)=>{
       const d = e.target.result;
       if(!d.objectStoreNames.contains("transactions")){
@@ -918,6 +1114,14 @@ function openDb(){
       }
       if(!d.objectStoreNames.contains("clients")){
         d.createObjectStore("clients", {keyPath:"id"});
+      }
+      if(!d.objectStoreNames.contains("employees")){
+        d.createObjectStore("employees", {keyPath:"id"});
+      }
+      if(!d.objectStoreNames.contains("payslips")){
+        const store = d.createObjectStore("payslips", {keyPath:"id"});
+        store.createIndex("employeeId", "employeeId");
+        store.createIndex("payDate", "payDate");
       }
     };
     req.onsuccess = (e)=>resolve(e.target.result);
@@ -942,6 +1146,12 @@ const deleteInvoice=(id)=>deleteRecord("invoices",id);
 const getAllClients=()=>getAll("clients");
 const putClient=(t)=>putRecord("clients",t);
 const deleteClient=(id)=>deleteRecord("clients",id);
+
+const getAllEmployees=()=>getAll("employees");
+const putEmployee=(t)=>putRecord("employees",t);
+
+const getAllPayslips=()=>getAll("payslips");
+const putPayslip=(t)=>putRecord("payslips",t);
 
 /* ---------- Fiscal year helpers (Apr 1 – Mar 31) ---------- */
 function fyForDate(dateStr){
@@ -973,11 +1183,15 @@ function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':
 function addDays(dateStr, days){ const d = new Date(dateStr+"T00:00:00"); d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); }
 
 /* ---------- Tabs ---------- */
-document.querySelectorAll('nav.tabs button').forEach(btn=>{
+document.querySelectorAll('nav.tabs button[data-view]').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('nav.tabs button[data-view]').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tab-group-toggle').forEach(b=>b.classList.remove('group-active'));
+    document.querySelectorAll('.tab-group-menu').forEach(m=>m.classList.remove('open'));
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     btn.classList.add('active');
+    const parentGroup = btn.closest('.tab-group');
+    if(parentGroup) parentGroup.querySelector('.tab-group-toggle').classList.add('group-active');
     document.getElementById('view-'+btn.dataset.view).classList.add('active');
     if(btn.dataset.view==='transactions') renderTransactions();
     if(btn.dataset.view==='invoices') renderInvoices();
@@ -985,8 +1199,20 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
     if(btn.dataset.view==='monthly') renderMonthly();
     if(btn.dataset.view==='gst') renderGst();
     if(btn.dataset.view==='cra') renderCraReport();
+    if(btn.dataset.view==='payroll') renderPayroll();
     if(btn.dataset.view==='settings') renderClientsPreview();
   });
+});
+function toggleTabGroup(btn){
+  const menu = btn.nextElementSibling;
+  const isOpen = menu.classList.contains('open');
+  document.querySelectorAll('.tab-group-menu').forEach(m=>m.classList.remove('open'));
+  if(!isOpen) menu.classList.add('open');
+}
+document.addEventListener('click', (e)=>{
+  if(!e.target.closest('.tab-group')){
+    document.querySelectorAll('.tab-group-menu').forEach(m=>m.classList.remove('open'));
+  }
 });
 
 /* ---------- Category dropdowns (transactions) ---------- */
@@ -2252,7 +2478,8 @@ async function gdriveUpload(payload){
 /* ---- Point-in-time snapshots (separate from the live sync file, never overwritten) ---- */
 const SNAPSHOT_PREFIX = 'apd_backup_';
 async function createDriveSnapshot(payload){
-  const filename = `${SNAPSHOT_PREFIX}${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+  const label = sanitizeForFilename(getDeviceLabel()) || 'Device';
+  const filename = `${SNAPSHOT_PREFIX}${label}_${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
   const metadata = {name: filename, parents: ['appDataFolder']};
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
@@ -2319,8 +2546,10 @@ async function openBackupBrowser(){
     if(files.length===0){ container.innerHTML = '<p class="hint">No backups yet — they\'re created automatically each time you sync with Google Drive.</p>'; return; }
     container.innerHTML = files.map(f=>{
       const d = new Date(f.createdTime);
+      const m = f.name.match(/^apd_backup_(.+?)_\d{4}-\d{2}-\d{2}T/);
+      const label = m ? m[1].replace(/_/g,' ') : 'Unknown device';
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;">
-        <span>${d.toLocaleString()}</span>
+        <span><b>${escapeHtml(label)}</b> — ${d.toLocaleString()}</span>
         <button class="btn ghost sm" onclick="restoreFromSnapshot('${f.id}')">Restore this</button>
       </div>`;
     }).join('');
@@ -2348,7 +2577,7 @@ async function syncWithDrive(manual){
       }
     }
     // Push merged local state back up so Drive always holds the latest combined snapshot
-    const payload = {app:'apd-bookkeeping', version:2, exportedAt:new Date().toISOString(), transactions:ALL_TXNS, invoices:ALL_INVOICES, clients:ALL_CLIENTS};
+    const payload = {app:'apd-bookkeeping', version:2, exportedAt:new Date().toISOString(), deviceLabel:getDeviceLabel(), transactions:ALL_TXNS, invoices:ALL_INVOICES, clients:ALL_CLIENTS};
     await gdriveUpload(payload);
     // Also write a dated, never-overwritten snapshot for point-in-time recovery
     try{
@@ -2434,6 +2663,487 @@ function renderGst(){
   document.getElementById('gstItc').textContent = fmt(itc);
   const netEl = document.getElementById('gstNet');
   netEl.textContent = fmt(net); netEl.className = 'value ' + (net>=0?'pos':'neg');
+}
+
+/* =====================================================
+   PAYROLL
+   Estimates only — every calculated statutory figure is
+   editable and flagged for verification. Uses YTD-cumulative
+   tracking so annual CPP/EI maximums are respected correctly
+   across pay periods, and a simplified annualized-bracket
+   method for income tax withholding (not CRA's exact
+   per-pay-period formula — close enough for planning,
+   cross-check with CRA's PDOC before remitting).
+===================================================== */
+const PAY_PERIODS_PER_YEAR = {Monthly:12, 'Semi-monthly':24, Biweekly:26, Weekly:52};
+
+function calendarYearOf(dateStr){ return new Date(dateStr+"T00:00:00").getFullYear(); }
+
+function ytdBeforePayslip(employeeId, payDate, excludeId){
+  const year = calendarYearOf(payDate);
+  const prior = livePayslips().filter(p=>
+    p.employeeId===employeeId && p.id!==excludeId &&
+    calendarYearOf(p.payDate)===year && p.payDate < payDate
+  );
+  return {
+    gross: prior.reduce((s,p)=>s+p.grossPay,0),
+    cpp1: prior.reduce((s,p)=>s+p.cpp1,0),
+    cpp2: prior.reduce((s,p)=>s+p.cpp2,0),
+    ei: prior.reduce((s,p)=>s+p.ei,0),
+  };
+}
+
+function calcTaxForAnnualIncome(annualIncome, brackets, bpa){
+  // Simplified: apply brackets to gross annual income, then subtract a flat
+  // credit for the basic personal amount at the lowest bracket rate.
+  let tax = 0;
+  for(const [lo, hi, rate] of brackets){
+    const top = hi==null ? annualIncome : Math.min(annualIncome, hi);
+    if(annualIncome > lo){ tax += (top-lo) * rate; }
+  }
+  const lowestRate = brackets[0][2];
+  const credit = bpa * lowestRate;
+  return Math.max(0, tax - credit);
+}
+
+function calcPayslip(employee, grossPay, payFrequency, payDate, excludeId){
+  const rates = getPayrollRates();
+  const periodsPerYear = PAY_PERIODS_PER_YEAR[payFrequency] || 12;
+  const ytd = ytdBeforePayslip(employee.id, payDate, excludeId);
+
+  // --- CPP (tier 1) ---
+  const periodExemption = rates.cppBasicExemption / periodsPerYear;
+  const contributory1 = Math.max(0, grossPay - periodExemption);
+  const rawCpp1 = contributory1 * rates.cppRate1;
+  const cpp1RoomLeft = Math.max(0, rates.cppMax1 - ytd.cpp1);
+  const cpp1 = Math.min(rawCpp1, cpp1RoomLeft);
+
+  // --- CPP (tier 2 / CPP2, on earnings between YMPE and YAMPE) ---
+  const newYtdGross = ytd.gross + grossPay;
+  const band2Before = Math.min(Math.max(0, ytd.gross - rates.cppYMPE), rates.cppYAMPE - rates.cppYMPE);
+  const band2After = Math.min(Math.max(0, newYtdGross - rates.cppYMPE), rates.cppYAMPE - rates.cppYMPE);
+  const contributory2 = Math.max(0, band2After - band2Before);
+  const rawCpp2 = contributory2 * rates.cppRate2;
+  const cpp2RoomLeft = Math.max(0, rates.cppMax2 - ytd.cpp2);
+  const cpp2 = Math.min(rawCpp2, cpp2RoomLeft);
+
+  // --- EI ---
+  let ei = 0;
+  if(!employee.eiExempt){
+    const insurableBefore = Math.min(ytd.gross, rates.eiMaxInsurable);
+    const insurableAfter = Math.min(newYtdGross, rates.eiMaxInsurable);
+    const insurableThisPeriod = Math.max(0, insurableAfter - insurableBefore);
+    const rawEi = insurableThisPeriod * rates.eiRate;
+    const eiRoomLeft = Math.max(0, rates.eiMaxPremium - ytd.ei);
+    ei = Math.min(rawEi, eiRoomLeft);
+  }
+
+  // --- Income tax (simplified annualized-bracket method) ---
+  const annualizedGross = grossPay * periodsPerYear;
+  const fedAnnualTax = calcTaxForAnnualIncome(annualizedGross, rates.fedBrackets, rates.fedBPA);
+  const skAnnualTax = calcTaxForAnnualIncome(annualizedGross, rates.skBrackets, rates.skBPA);
+  const fedTax = fedAnnualTax / periodsPerYear;
+  const provTax = skAnnualTax / periodsPerYear;
+
+  const cppTotal = cpp1 + cpp2;
+  const taxTotal = fedTax + provTax;
+  const netPay = grossPay - cppTotal - ei - taxTotal;
+  const employerCpp = cppTotal; // employer matches employee CPP exactly
+  const employerEi = ei * rates.eiEmployerMultiplier;
+
+  return {cpp1, cpp2, cppTotal, ei, fedTax, provTax, taxTotal, netPay, employerCpp, employerEi};
+}
+
+/* ---------- Employees ---------- */
+function populateEmployeeSelect(){
+  const sel = document.getElementById('paySlipEmployee');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">Select…</option>' + liveEmployees().map(e=>`<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
+}
+function openEmployeesModal(){
+  renderEmployeesTable();
+  resetEmployeeForm();
+  document.getElementById('employeesOverlay').classList.add('open');
+}
+function closeEmployeesModal(){
+  document.getElementById('employeesOverlay').classList.remove('open');
+  populateEmployeeSelect();
+}
+function resetEmployeeForm(){
+  document.getElementById('employeeForm').reset();
+  document.getElementById('empId').value = '';
+  document.getElementById('empFormTitle').textContent = 'Add employee';
+  document.getElementById('empCancelBtn').style.display = 'none';
+  document.getElementById('empPayFreq').value = 'Monthly';
+}
+async function saveEmployee(){
+  const name = document.getElementById('empName').value.trim();
+  if(!name){ alert('Name is required.'); return; }
+  const id = document.getElementById('empId').value || uid('emp');
+  const emp = {
+    id, name,
+    role: document.getElementById('empRole').value,
+    payFrequency: document.getElementById('empPayFreq').value,
+    eiExempt: document.getElementById('empEiExempt').checked,
+    lastModified: Date.now(),
+  };
+  await putEmployee(emp);
+  await reloadAll();
+  resetEmployeeForm();
+  renderEmployeesTable();
+  populateEmployeeSelect();
+  toast('Employee saved');
+}
+function editEmployee(id){
+  const e = ALL_EMPLOYEES.find(x=>x.id===id);
+  if(!e) return;
+  document.getElementById('empId').value = e.id;
+  document.getElementById('empName').value = e.name;
+  document.getElementById('empRole').value = e.role || 'Director';
+  document.getElementById('empPayFreq').value = e.payFrequency || 'Monthly';
+  document.getElementById('empEiExempt').checked = !!e.eiExempt;
+  document.getElementById('empFormTitle').textContent = 'Edit employee';
+  document.getElementById('empCancelBtn').style.display = 'inline-flex';
+}
+async function removeEmployee(id){
+  const used = livePayslips().some(p=>p.employeeId===id);
+  if(used && !confirm("This person has payslips on file. Deleting them won't affect existing payslips (they keep a name snapshot). Continue?")) return;
+  if(!used && !confirm('Delete this employee?')) return;
+  const e = ALL_EMPLOYEES.find(x=>x.id===id);
+  if(!e) return;
+  e.deleted = true; e.lastModified = Date.now();
+  await putEmployee(e);
+  await reloadAll();
+  renderEmployeesTable();
+  populateEmployeeSelect();
+  toast('Employee deleted');
+}
+function renderEmployeesTable(){
+  const el = document.getElementById('employeesTable');
+  if(!el) return;
+  const emps = liveEmployees();
+  if(emps.length===0){ el.innerHTML = `<div class="empty">No employees yet. Add one above.</div>`; return; }
+  el.innerHTML = `<table><thead><tr><th>Name</th><th>Role</th><th>Pay frequency</th><th>EI exempt</th><th></th></tr></thead><tbody>
+    ${emps.map(e=>`<tr>
+      <td><b>${escapeHtml(e.name)}</b></td>
+      <td>${escapeHtml(e.role||'Director')}</td>
+      <td>${escapeHtml(e.payFrequency||'Monthly')}</td>
+      <td>${e.eiExempt ? '<span class="badge paid">Exempt</span>' : '<span class="badge draft">Not exempt</span>'}</td>
+      <td><div class="row-actions">
+        <button class="icon-btn" title="Edit" onclick='editEmployee("${e.id}")'>✏️</button>
+        <button class="icon-btn del" title="Delete" onclick='removeEmployee("${e.id}")'>🗑️</button>
+      </div></td>
+    </tr>`).join('')}
+  </tbody></table>`;
+}
+
+/* ---------- Payslip form ---------- */
+function onPayslipEmployeeChange(){
+  const emp = ALL_EMPLOYEES.find(x=>x.id===document.getElementById('paySlipEmployee').value);
+  if(emp) document.getElementById('paySlipFrequency').value = emp.payFrequency || 'Monthly';
+  recalcPayslipPreview();
+}
+function recalcPayslipPreview(){
+  const empId = document.getElementById('paySlipEmployee').value;
+  const emp = ALL_EMPLOYEES.find(x=>x.id===empId);
+  const gross = parseFloat(document.getElementById('paySlipGross').value)||0;
+  const freq = document.getElementById('paySlipFrequency').value;
+  const payDate = document.getElementById('paySlipPayDate').value || todayStr();
+  const excludeId = document.getElementById('paySlipId').value || null;
+  if(!emp || gross<=0){
+    document.getElementById('paySlipCalcWrap').style.display = 'none';
+    return;
+  }
+  const calc = calcPayslip(emp, gross, freq, payDate, excludeId);
+  document.getElementById('paySlipCalcWrap').style.display = 'block';
+  ['Cpp1','Cpp2','CppTotal','Ei','FedTax','ProvTax','TaxTotal','NetPay','EmployerCpp','EmployerEi'].forEach(key=>{
+    const el = document.getElementById('paySlip'+key+'Display');
+    if(el) el.textContent = fmt(calc[key.charAt(0).toLowerCase()+key.slice(1)]);
+  });
+  document.getElementById('paySlipCalc').dataset.calc = JSON.stringify(calc);
+}
+function openPayslipModal(existing){
+  document.getElementById('payslipForm').reset();
+  document.getElementById('paySlipId').value = '';
+  document.getElementById('paySlipPayDate').value = todayStr();
+  populateEmployeeSelect();
+  document.getElementById('paySlipCalcWrap').style.display = 'none';
+  if(existing){
+    document.getElementById('payslipModalTitle').textContent = 'Edit payslip';
+    document.getElementById('paySlipId').value = existing.id;
+    document.getElementById('paySlipEmployee').value = existing.employeeId;
+    document.getElementById('paySlipFrequency').value = existing.payFrequency;
+    document.getElementById('paySlipPeriodStart').value = existing.periodStart;
+    document.getElementById('paySlipPeriodEnd').value = existing.periodEnd;
+    document.getElementById('paySlipPayDate').value = existing.payDate;
+    document.getElementById('paySlipGross').value = existing.grossPay;
+    recalcPayslipPreview();
+    // Allow manual override of calculated figures with confirmed real numbers
+    ['Cpp1','Cpp2','Ei','FedTax','ProvTax'].forEach(k=>{});
+  } else {
+    document.getElementById('payslipModalTitle').textContent = 'New payslip';
+  }
+  document.getElementById('payslipOverlay').classList.add('open');
+}
+function closePayslipModal(){ document.getElementById('payslipOverlay').classList.remove('open'); }
+
+async function savePayslip(){
+  const empId = document.getElementById('paySlipEmployee').value;
+  const emp = ALL_EMPLOYEES.find(x=>x.id===empId);
+  if(!emp){ alert('Please select an employee.'); return; }
+  const gross = parseFloat(document.getElementById('paySlipGross').value)||0;
+  if(gross<=0){ alert('Enter a gross pay amount.'); return; }
+  const freq = document.getElementById('paySlipFrequency').value;
+  const payDate = document.getElementById('paySlipPayDate').value;
+  const periodStart = document.getElementById('paySlipPeriodStart').value;
+  const periodEnd = document.getElementById('paySlipPeriodEnd').value;
+  if(!payDate || !periodStart || !periodEnd){ alert('Please set the pay period dates and pay date.'); return; }
+
+  const id = document.getElementById('paySlipId').value || uid('pay');
+  const existing = ALL_PAYSLIPS.find(x=>x.id===id);
+  const calc = calcPayslip(emp, gross, freq, payDate, id);
+
+  const payslip = {
+    id, employeeId: empId, employeeName: emp.name,
+    payFrequency: freq, periodStart, periodEnd, payDate,
+    grossPay: gross,
+    cpp1: calc.cpp1, cpp2: calc.cpp2, cppTotal: calc.cppTotal,
+    ei: calc.ei, fedTax: calc.fedTax, provTax: calc.provTax, taxTotal: calc.taxTotal,
+    netPay: calc.netPay, employerCpp: calc.employerCpp, employerEi: calc.employerEi,
+    linkedTransactionId: existing ? existing.linkedTransactionId : null,
+    linkedEmployerTransactionId: existing ? existing.linkedEmployerTransactionId : null,
+    lastModified: Date.now(),
+  };
+  await putPayslip(payslip);
+
+  // Auto-create/update the matching bookkeeping transactions (net pay + employer-side CPP/EI cost)
+  const netTxn = {
+    id: payslip.linkedTransactionId || uid('txn'),
+    date: payDate, type: 'Expense', category: 'Salary/Wages',
+    description: `Payslip — ${emp.name} (${periodStart} to ${periodEnd})`,
+    party: emp.name, amount: payslip.netPay + payslip.cppTotal + payslip.ei + payslip.taxTotal, gst: 0,
+    total: payslip.netPay + payslip.cppTotal + payslip.ei + payslip.taxTotal,
+    payment: 'Payroll', notes: `Auto-created from payslip. Gross ${fmt(gross)}, net ${fmt(payslip.netPay)}.`,
+    receipt: null, invoiceId: null, invoiceNumber: null, lastModified: Date.now(),
+  };
+  await putTxn(netTxn);
+  payslip.linkedTransactionId = netTxn.id;
+
+  const employerCost = payslip.employerCpp + payslip.employerEi;
+  if(employerCost > 0){
+    const employerTxn = {
+      id: payslip.linkedEmployerTransactionId || uid('txn'),
+      date: payDate, type: 'Expense', category: 'Salary/Wages',
+      description: `Employer CPP/EI — ${emp.name} (${periodStart} to ${periodEnd})`,
+      party: emp.name, amount: employerCost, gst: 0, total: employerCost,
+      payment: 'Payroll', notes: `Employer-side CPP (${fmt(payslip.employerCpp)}) + EI (${fmt(payslip.employerEi)}) match.`,
+      receipt: null, invoiceId: null, invoiceNumber: null, lastModified: Date.now(),
+    };
+    await putTxn(employerTxn);
+    payslip.linkedEmployerTransactionId = employerTxn.id;
+  }
+  await putPayslip(payslip);
+
+  await reloadAll();
+  closePayslipModal();
+  toast('Payslip saved');
+}
+
+async function deletePayslip(id){
+  if(!confirm('Delete this payslip? Linked bookkeeping transactions will need to be removed separately if no longer needed.')) return;
+  const p = ALL_PAYSLIPS.find(x=>x.id===id);
+  if(!p) return;
+  p.deleted = true; p.lastModified = Date.now();
+  await putPayslip(p);
+  await reloadAll();
+  toast('Payslip deleted');
+}
+function editPayslipOpen(id){ const p = ALL_PAYSLIPS.find(x=>x.id===id); if(p) openPayslipModal(p); }
+
+/* ---------- Payroll rendering ---------- */
+function renderPayroll(){
+  populateEmployeeSelect();
+  const empFilterSel = document.getElementById('payrollEmpFilter');
+  if(empFilterSel){
+    const cur = empFilterSel.value;
+    empFilterSel.innerHTML = '<option value="">All people</option>' + liveEmployees().map(e=>`<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
+    if(cur) empFilterSel.value = cur;
+  }
+  const empFilter = empFilterSel ? empFilterSel.value : '';
+  const yearFilterSel = document.getElementById('payrollYearFilter');
+  const years = Array.from(new Set(livePayslips().map(p=>calendarYearOf(p.payDate)))).sort((a,b)=>b-a);
+  if(!years.includes(new Date().getFullYear())) years.unshift(new Date().getFullYear());
+  if(yearFilterSel){
+    const cur = yearFilterSel.value;
+    yearFilterSel.innerHTML = years.map(y=>`<option value="${y}">${y}</option>`).join('');
+    if(cur && years.includes(parseInt(cur))) yearFilterSel.value = cur; else yearFilterSel.value = String(new Date().getFullYear());
+  }
+  const yearFilter = yearFilterSel ? parseInt(yearFilterSel.value) : new Date().getFullYear();
+
+  let list = livePayslips().filter(p=>calendarYearOf(p.payDate)===yearFilter);
+  if(empFilter) list = list.filter(p=>p.employeeId===empFilter);
+  list.sort((a,b)=> b.payDate.localeCompare(a.payDate));
+
+  // YTD summary cards, per employee (or filtered employee)
+  const empIds = empFilter ? [empFilter] : liveEmployees().map(e=>e.id);
+  const ytdHtml = empIds.map(id=>{
+    const emp = ALL_EMPLOYEES.find(e=>e.id===id);
+    if(!emp) return '';
+    const slips = livePayslips().filter(p=>p.employeeId===id && calendarYearOf(p.payDate)===yearFilter);
+    if(slips.length===0) return '';
+    const sum = (key)=> slips.reduce((s,p)=>s+p[key],0);
+    return `<div class="stat">
+      <div class="label">${escapeHtml(emp.name)} — YTD ${yearFilter}</div>
+      <div class="value">${fmt(sum('grossPay'))}</div>
+      <div class="sub">CPP ${fmt(sum('cppTotal'))} · EI ${fmt(sum('ei'))} · Tax ${fmt(sum('taxTotal'))} · Net ${fmt(sum('netPay'))}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('payrollYtdCards').innerHTML = ytdHtml || `<div class="empty">No payslips yet for ${yearFilter}.</div>`;
+
+  const el = document.getElementById('payslipsTable');
+  if(list.length===0){ el.innerHTML = `<div class="empty"><div class="big">💵</div>No payslips for this filter. Click "+ New payslip" to create one.</div>`; return; }
+  el.innerHTML = `<table><thead><tr>
+    <th>Pay date</th><th>Employee</th><th>Period</th><th style="text-align:right">Gross</th><th style="text-align:right">CPP</th><th style="text-align:right">EI</th><th style="text-align:right">Tax</th><th style="text-align:right">Net</th><th></th>
+  </tr></thead><tbody>
+    ${list.map(p=>`<tr>
+      <td><a href="#" onclick="event.preventDefault(); editPayslipOpen('${p.id}')" style="color:var(--navy);font-weight:600;text-decoration:none;">${p.payDate}</a></td>
+      <td>${escapeHtml(p.employeeName)}</td>
+      <td style="font-size:12px;color:var(--ink-soft);">${p.periodStart} – ${p.periodEnd}</td>
+      <td class="num">${fmt(p.grossPay)}</td>
+      <td class="num">${fmt(p.cppTotal)}</td>
+      <td class="num">${fmt(p.ei)}</td>
+      <td class="num">${fmt(p.taxTotal)}</td>
+      <td class="num"><b>${fmt(p.netPay)}</b></td>
+      <td><div class="row-actions">
+        <button class="icon-btn" title="Print payslip" onclick='printPayslip("${p.id}")'>🖨️</button>
+        <button class="icon-btn del" title="Delete" onclick='deletePayslip("${p.id}")'>🗑️</button>
+      </div></td>
+    </tr>`).join('')}
+  </tbody></table>`;
+}
+
+function payslipHtml(p){
+  const emp = ALL_EMPLOYEES.find(e=>e.id===p.employeeId);
+  const ytd = livePayslips().filter(x=>x.employeeId===p.employeeId && calendarYearOf(x.payDate)===calendarYearOf(p.payDate) && x.payDate<=p.payDate);
+  const ytdSum = (key)=> ytd.reduce((s,x)=>s+x[key],0);
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Payslip — ${escapeHtml(p.employeeName)} — ${p.payDate}</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;color:#1B2430;margin:0;padding:40px;}
+    .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1F3864;padding-bottom:18px;margin-bottom:26px;}
+    .brand{display:flex;align-items:center;gap:14px;}
+    .brand img{height:44px;}
+    .brand-divider{width:1px;height:38px;background:#DCE3EC;}
+    .brand-text h1{font-size:18px;margin:0;color:#1F3864;}
+    .brand-text p{font-size:11px;color:#5B6B82;margin:2px 0 0;}
+    h2{font-size:22px;color:#1F3864;margin:0 0 6px;}
+    table{width:100%;border-collapse:collapse;margin-bottom:20px;}
+    th{background:#1F3864;color:#fff;text-align:left;padding:9px 10px;font-size:11px;text-transform:uppercase;}
+    td{padding:9px 10px;border-bottom:1px solid #DCE3EC;font-size:13px;}
+    .num{text-align:right;font-variant-numeric:tabular-nums;}
+    .totals{width:320px;margin-left:auto;font-size:13.5px;}
+    .totals div{display:flex;justify-content:space-between;padding:6px 0;}
+    .totals .grand{border-top:2px solid #1F3864;font-weight:800;color:#1F3864;font-size:16px;padding-top:10px;}
+    .notice{margin-top:30px;font-size:11.5px;color:#946200;background:#FFF3DD;border:1px solid #EBD199;border-radius:8px;padding:14px 16px;}
+    @media print{ body{padding:20px;} }
+  </style></head><body>
+    <div class="head">
+      <div class="brand">
+        <img src="data:image/png;base64,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" alt="APD Services">
+        <div class="brand-divider"></div>
+        <div class="brand-text"><h1>APD Services</h1><p>17911718 Canada Inc.<br>Payroll record</p></div>
+      </div>
+      <div><h2>PAYSLIP</h2><div style="color:#5B6B82;font-size:12.5px;">Pay date: ${p.payDate}<br>Period: ${p.periodStart} – ${p.periodEnd}</div></div>
+    </div>
+    <p style="font-size:13.5px;"><b>${escapeHtml(p.employeeName)}</b></p>
+    <table><thead><tr><th>Item</th><th style="text-align:right">This period</th><th style="text-align:right">Year-to-date</th></tr></thead>
+      <tbody>
+        <tr><td>Gross pay</td><td class="num">${fmt(p.grossPay)}</td><td class="num">${fmt(ytdSum('grossPay'))}</td></tr>
+        <tr><td>CPP</td><td class="num">-${fmt(p.cppTotal)}</td><td class="num">${fmt(ytdSum('cppTotal'))}</td></tr>
+        <tr><td>EI</td><td class="num">-${fmt(p.ei)}</td><td class="num">${fmt(ytdSum('ei'))}</td></tr>
+        <tr><td>Federal tax</td><td class="num">-${fmt(p.fedTax)}</td><td class="num">${fmt(ytdSum('fedTax'))}</td></tr>
+        <tr><td>Saskatchewan tax</td><td class="num">-${fmt(p.provTax)}</td><td class="num">${fmt(ytdSum('provTax'))}</td></tr>
+      </tbody>
+    </table>
+    <div class="totals">
+      <div class="grand"><span>Net pay</span><span>${fmt(p.netPay)}</span></div>
+    </div>
+    <div class="notice"><b>Note:</b> deductions shown are estimates based on ${getPayrollRates().year} CRA/Saskatchewan rates using a simplified calculation method. Confirm with CRA's Payroll Deductions Online Calculator (PDOC) or your accountant before remitting.</div>
+  </body></html>`;
+}
+function printPayslip(id){
+  const p = ALL_PAYSLIPS.find(x=>x.id===id);
+  if(!p) return;
+  const w = window.open('', '_blank');
+  if(!w){ alert('Please allow pop-ups to print or save the payslip.'); return; }
+  w.document.write(payslipHtml(p));
+  w.document.close();
+  setTimeout(()=>{ w.focus(); w.print(); }, 400);
+}
+
+/* ---------- Payroll rate settings ---------- */
+function renderPayrollRatesForm(){
+  const r = getPayrollRates();
+  const el = document.getElementById('payrollRatesForm');
+  if(!el) return;
+  el.innerHTML = `
+    <div class="form-grid">
+      <div class="field"><label>Rates year</label><input type="number" id="prYear" value="${r.year}"></div>
+      <div class="field"><label>Last verified</label><input type="date" id="prLastVerified" value="${r.lastVerified}"></div>
+      <div class="field"><label>CPP basic exemption</label><input type="number" step="0.01" id="prCppExempt" value="${r.cppBasicExemption}"></div>
+      <div class="field"><label>CPP rate (tier 1)</label><input type="number" step="0.0001" id="prCppRate1" value="${r.cppRate1}"></div>
+      <div class="field"><label>CPP YMPE (tier 1 ceiling)</label><input type="number" step="0.01" id="prCppYMPE" value="${r.cppYMPE}"></div>
+      <div class="field"><label>CPP max (tier 1)</label><input type="number" step="0.01" id="prCppMax1" value="${r.cppMax1}"></div>
+      <div class="field"><label>CPP2 rate (tier 2)</label><input type="number" step="0.0001" id="prCppRate2" value="${r.cppRate2}"></div>
+      <div class="field"><label>CPP YAMPE (tier 2 ceiling)</label><input type="number" step="0.01" id="prCppYAMPE" value="${r.cppYAMPE}"></div>
+      <div class="field"><label>CPP2 max</label><input type="number" step="0.01" id="prCppMax2" value="${r.cppMax2}"></div>
+      <div class="field"><label>EI rate</label><input type="number" step="0.0001" id="prEiRate" value="${r.eiRate}"></div>
+      <div class="field"><label>EI max insurable earnings</label><input type="number" step="0.01" id="prEiMaxIns" value="${r.eiMaxInsurable}"></div>
+      <div class="field"><label>EI max premium</label><input type="number" step="0.01" id="prEiMaxPrem" value="${r.eiMaxPremium}"></div>
+      <div class="field"><label>EI employer multiplier</label><input type="number" step="0.01" id="prEiEmpMult" value="${r.eiEmployerMultiplier}"></div>
+      <div class="field"><label>Federal BPA</label><input type="number" step="0.01" id="prFedBPA" value="${r.fedBPA}"></div>
+      <div class="field"><label>Saskatchewan BPA</label><input type="number" step="0.01" id="prSkBPA" value="${r.skBPA}"></div>
+    </div>
+    <p class="hint" style="margin-top:10px;">Federal and Saskatchewan tax bracket thresholds/rates use the built-in ${r.year} values (5 brackets each) — editable via "Advanced JSON" below if a future year changes the bracket structure itself, not just these headline numbers.</p>
+    <details style="margin-top:8px;">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft);font-weight:600;">Advanced: edit full bracket JSON</summary>
+      <textarea id="prBracketsJson" rows="6" style="width:100%;margin-top:8px;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px;">${JSON.stringify({fedBrackets:r.fedBrackets, skBrackets:r.skBrackets}, null, 2)}</textarea>
+    </details>
+  `;
+}
+function savePayrollRatesFromForm(){
+  const r = getPayrollRates();
+  try{
+    const brackets = JSON.parse(document.getElementById('prBracketsJson').value);
+    const updated = {
+      year: parseInt(document.getElementById('prYear').value)||r.year,
+      lastVerified: document.getElementById('prLastVerified').value || r.lastVerified,
+      cppBasicExemption: parseFloat(document.getElementById('prCppExempt').value),
+      cppRate1: parseFloat(document.getElementById('prCppRate1').value),
+      cppYMPE: parseFloat(document.getElementById('prCppYMPE').value),
+      cppMax1: parseFloat(document.getElementById('prCppMax1').value),
+      cppRate2: parseFloat(document.getElementById('prCppRate2').value),
+      cppYAMPE: parseFloat(document.getElementById('prCppYAMPE').value),
+      cppMax2: parseFloat(document.getElementById('prCppMax2').value),
+      eiRate: parseFloat(document.getElementById('prEiRate').value),
+      eiMaxInsurable: parseFloat(document.getElementById('prEiMaxIns').value),
+      eiMaxPremium: parseFloat(document.getElementById('prEiMaxPrem').value),
+      eiEmployerMultiplier: parseFloat(document.getElementById('prEiEmpMult').value),
+      fedBPA: parseFloat(document.getElementById('prFedBPA').value),
+      skBPA: parseFloat(document.getElementById('prSkBPA').value),
+      fedBrackets: brackets.fedBrackets,
+      skBrackets: brackets.skBrackets,
+    };
+    savePayrollRates(updated);
+    toast('Payroll rates saved');
+  }catch(err){
+    alert('Could not save — check the Advanced JSON is valid: ' + err.message);
+  }
+}
+function resetPayrollRatesConfirm(){
+  if(!confirm('Reset all payroll rates back to the built-in defaults?')) return;
+  resetPayrollRates();
+  renderPayrollRatesForm();
+  toast('Reset to defaults');
 }
 
 /* =====================================================
@@ -2682,23 +3392,41 @@ function renderCoa(){
 }
 
 /* ---------- Export / Import ---------- */
+function sanitizeForFilename(s){
+  return (s||'').trim().replace(/[^a-zA-Z0-9_\- ]/g,'').replace(/\s+/g,'_').slice(0,30);
+}
+function getDeviceLabel(){
+  const stored = gLS_get('device_label');
+  return stored && stored.trim() ? stored.trim() : 'Device';
+}
+function saveDeviceLabel(){
+  const val = document.getElementById('deviceLabelInput').value.trim();
+  gLS_set('device_label', val);
+  toast('Device name saved');
+}
+
 function exportCsv(){
   const headers = ["Date","Type","Category","Description","Client/Vendor","Amount (Excl. GST/HST)","GST/HST","Total (Incl. GST/HST)","Payment Method","Notes","Invoice #"];
   const rows = [...liveTxns()].sort((a,b)=>a.date.localeCompare(b.date)).map(t=>[
     t.date, t.type, t.category, t.description, t.party, t.amount, t.gst, t.total, t.payment, t.notes, t.invoiceNumber||''
   ]);
   const csv = [headers, ...rows].map(r=> r.map(csvEscape).join(',')).join('\r\n');
-  downloadBlob(csv, `APD_Services_Transactions_${new Date().toISOString().slice(0,10)}.csv`, 'text/csv');
-  toast('CSV exported');
+  const label = sanitizeForFilename(getDeviceLabel());
+  downloadBlob(csv, `APD_Backups/APD_Services_Transactions_${label}_${new Date().toISOString().slice(0,10)}.csv`, 'text/csv');
+  toast('CSV exported to Downloads/APD_Backups');
 }
 function csvEscape(v){ const s = String(v??''); if(/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"'; return s; }
 function exportJson(){
-  const payload = {app:'apd-bookkeeping', version:2, exportedAt:new Date().toISOString(), transactions:ALL_TXNS, invoices:ALL_INVOICES, clients:ALL_CLIENTS};
-  downloadBlob(JSON.stringify(payload,null,2), `APD_Services_Bookkeeping_Sync_${new Date().toISOString().slice(0,10)}.json`, 'application/json');
+  const label = sanitizeForFilename(getDeviceLabel());
+  const payload = {app:'apd-bookkeeping', version:2, exportedAt:new Date().toISOString(), deviceLabel:getDeviceLabel(), transactions:ALL_TXNS, invoices:ALL_INVOICES, clients:ALL_CLIENTS};
+  downloadBlob(JSON.stringify(payload,null,2), `APD_Backups/APD_Services_Bookkeeping_Backup_${label}_${new Date().toISOString().slice(0,10)}.json`, 'application/json');
   gLS_set('last_local_export', String(Date.now()));
-  toast('Sync file exported');
+  toast('Backup exported to Downloads/APD_Backups');
 }
 function downloadBlob(content, filename, mime){
+  // A filename containing a "/" makes Chrome/Edge (desktop and Android) and
+  // recent Firefox automatically create/use a subfolder under Downloads —
+  // no special permission needed, works the same as any other download.
   const blob = new Blob([content], {type:mime});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = filename;
@@ -3031,7 +3759,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v15 — 2026-07-26';
+const APP_VERSION = 'v17 — 2026-07-27';
 
 async function forceUpdateApp(){
   try{
@@ -3072,12 +3800,16 @@ async function reloadAll(){
   ALL_TXNS = await getAllTxns();
   ALL_INVOICES = await getAllInvoices();
   ALL_CLIENTS = await getAllClients();
+  ALL_EMPLOYEES = await getAllEmployees();
+  ALL_PAYSLIPS = await getAllPayslips();
   renderDashboard();
   if(document.getElementById('view-transactions').classList.contains('active')) renderTransactions();
   if(document.getElementById('view-invoices').classList.contains('active')) renderInvoices();
   if(document.getElementById('view-ar').classList.contains('active')) renderAR();
   if(document.getElementById('view-monthly').classList.contains('active')) renderMonthly();
   if(document.getElementById('view-gst').classList.contains('active')) renderGst();
+  if(document.getElementById('view-cra').classList.contains('active')) renderCraReport();
+  if(document.getElementById('view-payroll').classList.contains('active')) renderPayroll();
   if(document.getElementById('view-settings').classList.contains('active')) renderClientsPreview();
 }
 
@@ -3086,8 +3818,11 @@ async function reloadAll(){
   populateCategorySelect(document.getElementById('txnCategory'), false, 'Income');
   renderCoa();
   renderGifiMapTable();
+  renderPayrollRatesForm();
   await reloadAll();
+  populateEmployeeSelect();
   initGDriveUI();
+  const dl = document.getElementById('deviceLabelInput'); if(dl) dl.value = gLS_get('device_label') || '';
   document.getElementById('appVersionLabel').textContent = `Running: ${APP_VERSION}`;
   document.getElementById('footerVersion').textContent = APP_VERSION;
 
