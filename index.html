@@ -644,8 +644,9 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
             <option>Debit Card</option><option>Cash</option><option>Cheque</option><option>Other</option>
           </select>
         </div>
-        <div class="field"><label>Amount (excl. GST/HST)</label><input type="number" step="0.01" min="0" id="txnAmount" required oninput="calcTotal()"></div>
-        <div class="field"><label>GST/HST</label><input type="number" step="0.01" min="0" id="txnGst" oninput="calcTotal()"></div>
+        <div class="field"><label>Amount (excl. GST/HST)</label><input type="number" step="0.01" id="txnAmount" required oninput="calcTotal()"></div>
+        <div class="field"><label>GST/HST</label><input type="number" step="0.01" id="txnGst" oninput="calcTotal()"></div>
+        <div class="field full"><p class="hint" style="margin:-6px 0 0;">Enter a negative amount for a refund/credit on a prior expense (e.g. "Refunds & Rebates Received" category) — this correctly reduces that category's total instead of counting as income.</p></div>
         <div class="field full">
           <button type="button" class="btn ghost sm" style="align-self:flex-start;" onclick="autoGst()">Auto-calculate 5% GST</button>
         </div>
@@ -998,6 +999,7 @@ const CHART_OF_ACCOUNTS = [
   {category:"Consulting Revenue", type:"Income", notes:"IT consulting / enterprise architecture engagements"},
   {category:"Product/Photography Revenue", type:"Income", notes:"AD Photoz income"},
   {category:"Other Revenue", type:"Income", notes:"Any income not covered above"},
+  {category:"Refunds & Rebates Received", type:"Expense", notes:"Money refunded back on a prior expense (e.g. a purchase return or overcharge correction). Enter the amount as NEGATIVE — this reduces your total expenses instead of counting as income, which is the correct accounting treatment for an expense refund."},
   {category:"Subcontractors", type:"Expense", notes:"Payments to contractors delivering client work"},
   {category:"Software & SaaS Subscriptions", type:"Expense", notes:"Tools tied to service delivery or admin"},
   {category:"Office Supplies", type:"Expense", notes:"Consumables, small equipment"},
@@ -1039,6 +1041,7 @@ const GIFI_DEFAULTS = {
   "Vehicle/Mileage": {code:"9281", label:"Motor vehicle expenses"},
   "Salary/Wages": {code:"9060", label:"Salaries, wages and benefits"},
   "Dividends": {code:"N/A", label:"Not a GIFI operating expense — dividends are paid from after-tax retained earnings, reported elsewhere on the T2 (not as a deductible expense). Flagged, not mapped."},
+  "Refunds & Rebates Received": {code:"9270", label:"Other expenses (contra) — nets against expenses. If you know which category the refund relates to, consider entering it as a negative amount in that original category instead for more precise GIFI grouping."},
   "Other Expense": {code:"9270", label:"Other expenses"},
 };
 function getGifiMap(){
@@ -3196,7 +3199,7 @@ function resetPayrollRatesConfirm(){
    human decision.
 ===================================================== */
 let craReportMode = 'filing';
-const ZERO_GST_EXEMPT_CATEGORIES = new Set(["Bank & Merchant Fees","Salary/Wages","Dividends","Insurance"]);
+const ZERO_GST_EXEMPT_CATEGORIES = new Set(["Bank & Merchant Fees","Salary/Wages","Dividends","Insurance","Refunds & Rebates Received"]);
 const LARGE_TXN_THRESHOLD = 2000;
 
 function setCraReportMode(mode){
@@ -3529,6 +3532,9 @@ function parseImportDate(str){
 const TRANSFER_PATTERNS = [/\btransfer\b/i, /\be-?transfer\b/i, /payment\s*-\s*thank you/i, /pai\s*ement\s*-\s*merci/i, /\bbill payment\b/i];
 function isLikelyTransfer(desc){ return TRANSFER_PATTERNS.some(rx=>rx.test(desc)); }
 
+const REFUND_PATTERNS = [/\brefund\b/i, /\breturn\b/i, /\breversal\b/i, /\bcredit\s*adj/i, /\bchargeback\b/i, /\bcredit\s*memo\b/i];
+function isLikelyRefund(desc){ return REFUND_PATTERNS.some(rx=>rx.test(desc)); }
+
 const CATEGORY_KEYWORDS = [
   [/anthropic|claude|microsoft|adobe|google workspace|aws|amazon web|github|netflix|spotify|software|saas|subscription|dropbox|zoom/i, "Software & SaaS Subscriptions"],
   [/annual fee|monthly fee|service charge|nsf|overdraft|interest|bank fee/i, "Bank & Merchant Fees"],
@@ -3622,7 +3628,7 @@ function toggleAmountMode(){
 function buildDupSignatureSet(){
   const set = new Set();
   liveTxns().forEach(t=>{
-    set.add(`${t.date}|${t.amount.toFixed(2)}`);
+    set.add(`${t.date}|${Math.abs(t.amount).toFixed(2)}`);
   });
   return set;
 }
@@ -3669,17 +3675,18 @@ function applyImportMapping(){
     }
     if(!date || isNaN(signed) || signed===0) return; // skip unparseable/empty rows
 
-    const isIncome = signed > 0;
-    const amount = Math.abs(signed);
+    const isRefund = signed > 0 && isLikelyRefund(desc);
+    const isIncome = signed > 0 && !isRefund;
+    const amount = isRefund ? -Math.abs(signed) : Math.abs(signed);
     const transfer = isLikelyTransfer(desc);
-    const sig = `${date}|${amount.toFixed(2)}`;
+    const sig = `${date}|${Math.abs(signed).toFixed(2)}`;
     const duplicate = dupSet.has(sig);
 
     importCandidates.push({
       date, description: desc, amount, accountLabel,
       type: isIncome ? 'Income' : 'Expense',
-      category: guessCategory(desc, isIncome),
-      transfer, duplicate,
+      category: isRefund ? "Refunds & Rebates Received" : guessCategory(desc, isIncome),
+      transfer, duplicate, refund: isRefund,
       include: !transfer && !duplicate,
     });
   });
@@ -3691,13 +3698,15 @@ function renderImportPreview(){
   const body = document.getElementById('importPreviewBody');
   const dupCount = importCandidates.filter(c=>c.duplicate).length;
   const transferCount = importCandidates.filter(c=>c.transfer).length;
+  const refundCount = importCandidates.filter(c=>c.refund).length;
   document.getElementById('importSummary').textContent =
-    `${importCandidates.length} rows found · ${dupCount} possible duplicates · ${transferCount} possible transfers (all pre-unchecked — review before including)`;
+    `${importCandidates.length} rows found · ${dupCount} possible duplicates · ${transferCount} possible transfers · ${refundCount} likely refunds (auto-classified as expense credits, not income)`;
 
   body.innerHTML = importCandidates.map((c,i)=>{
     const flags = [];
     if(c.duplicate) flags.push('<span class="badge overdue">Possible duplicate</span>');
     if(c.transfer) flags.push('<span class="badge draft">Possible transfer</span>');
+    if(c.refund) flags.push('<span class="badge sent">Refund — treated as expense credit</span>');
     return `<tr>
       <td><input type="checkbox" ${c.include?'checked':''} onchange="importCandidates[${i}].include=this.checked"></td>
       <td>${c.date}</td>
@@ -3799,7 +3808,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v18 — 2026-07-27';
+const APP_VERSION = 'v19 — 2026-07-27';
 
 async function forceUpdateApp(){
   try{
