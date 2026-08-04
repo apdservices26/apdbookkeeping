@@ -487,6 +487,12 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 
   <!-- SETTINGS -->
   <section class="view" id="view-settings">
+    <div class="seg" style="margin-bottom:18px;">
+      <button type="button" data-settingsgroup="settings" class="active" onclick="setSettingsGroup('settings')">Settings</button>
+      <button type="button" data-settingsgroup="masters" onclick="setSettingsGroup('masters')">Masters</button>
+    </div>
+
+    <div id="settingsGroupSettings">
     <div class="card">
       <h2>Google Drive sync <small>Automatic sync between all your devices via a private file in your own Google Drive. No server of ours involved — this app talks directly to Google.</small></h2>
       <div id="gdriveNotConfigured">
@@ -563,16 +569,47 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     </div>
 
     <div class="card">
+      <h2>App version <small>If something looks out of date after I ship a fix, use this to force-load the latest version.</small></h2>
+      <p class="hint" id="appVersionLabel" style="margin-bottom:10px;"></p>
+      <button class="btn secondary sm" onclick="forceUpdateApp()">🔄 Check for updates</button>
+    </div>
+
+    <div class="card">
+      <h2>Danger zone</h2>
+      <div class="actions">
+        <button class="btn danger sm" onclick="clearAllData()">Delete all transactions</button>
+        <button class="btn danger sm" onclick="clearAllInvoices()">Delete all invoices & clients</button>
+      </div>
+    </div>
+    </div>
+
+    <div id="settingsGroupMasters" style="display:none;">
+    <div class="card">
       <h2>Clients</h2>
       <div class="actions" style="margin-bottom:12px;"><button class="btn secondary sm" onclick="openClientsModal()">Manage clients</button></div>
       <div id="clientsPreview" class="table-wrap"></div>
     </div>
 
     <div class="card">
-      <h2>Chart of accounts</h2>
+      <h2>Chart of accounts <small>Add your own categories freely. A handful (🔒) are relied on by name elsewhere in the app — Payroll, Invoicing, and CRA Prep — so those stay protected from renaming or deletion.</small></h2>
+      <div class="card" style="margin-bottom:16px;box-shadow:none;border:1px dashed var(--line);">
+        <h2 id="coaFormTitle" style="margin-bottom:12px;">Add category</h2>
+        <form id="coaForm" class="form-grid">
+          <input type="hidden" id="coaOriginalName">
+          <div class="field"><label>Category name</label><input type="text" id="coaName" required></div>
+          <div class="field"><label>Type</label>
+            <select id="coaType"><option value="Income">Income</option><option value="Expense">Expense</option></select>
+          </div>
+          <div class="field full"><label>Notes (optional)</label><input type="text" id="coaNotes" placeholder="What this category is for"></div>
+        </form>
+        <div class="actions" style="margin-top:10px;">
+          <button class="btn sm" onclick="saveCoaCategory()">Save</button>
+          <button class="btn ghost sm" id="coaCancelBtn" style="display:none;" onclick="resetCoaForm()">Cancel edit</button>
+        </div>
+      </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Category</th><th>Type</th><th>Notes</th></tr></thead>
+          <thead><tr><th>Category</th><th>Type</th><th>Notes</th><th></th></tr></thead>
           <tbody id="coaTable"></tbody>
         </table>
       </div>
@@ -599,19 +636,6 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
         <button class="btn ghost sm" onclick="resetPayrollRatesConfirm()">Reset to built-in defaults</button>
       </div>
     </div>
-
-    <div class="card">
-      <h2>App version <small>If something looks out of date after I ship a fix, use this to force-load the latest version.</small></h2>
-      <p class="hint" id="appVersionLabel" style="margin-bottom:10px;"></p>
-      <button class="btn secondary sm" onclick="forceUpdateApp()">🔄 Check for updates</button>
-    </div>
-
-    <div class="card">
-      <h2>Danger zone</h2>
-      <div class="actions">
-        <button class="btn danger sm" onclick="clearAllData()">Delete all transactions</button>
-        <button class="btn danger sm" onclick="clearAllInvoices()">Delete all invoices & clients</button>
-      </div>
     </div>
   </section>
 
@@ -646,7 +670,17 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
         </div>
         <div class="field"><label>Amount (excl. GST/HST)</label><input type="number" step="0.01" id="txnAmount" required oninput="calcTotal()"></div>
         <div class="field"><label>GST/HST</label><input type="number" step="0.01" id="txnGst" oninput="calcTotal()"></div>
-        <div class="field full"><p class="hint" style="margin:-6px 0 0;">Enter a negative amount for a refund/credit on a prior expense (e.g. "Refunds & Rebates Received" category) — this correctly reduces that category's total instead of counting as income.</p></div>
+        <div class="field full"><p class="hint" style="margin:-6px 0 0;">For a refund/credit on a prior expense, enter a negative amount. Optionally link it below to the specific purchase it's refunding.</p></div>
+        <div class="field full">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;font-size:13.5px;color:var(--ink);text-transform:none;">
+            <input type="checkbox" id="txnIsRefund" style="width:auto;" onchange="toggleRefundLinkUI()"> This is a refund of an existing transaction (optional)
+          </label>
+          <div id="refundLinkWrap" style="display:none;margin-top:10px;">
+            <input type="search" id="refundLinkSearch" placeholder="Search by description, date, or amount…" oninput="renderRefundLinkOptions()" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:13.5px;margin-bottom:8px;">
+            <select id="refundLinkSelect" size="5" style="width:100%;border:1px solid var(--line);border-radius:8px;padding:6px;font-size:13px;" onchange="onRefundLinkSelected()"></select>
+            <p class="hint" id="refundLinkSummary" style="margin-top:6px;"></p>
+          </div>
+        </div>
         <div class="field full">
           <button type="button" class="btn ghost sm" style="align-self:flex-start;" onclick="autoGst()">Auto-calculate 5% GST</button>
         </div>
@@ -995,7 +1029,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
    Storage: IndexedDB (per-device, offline-capable)
 --------------------------------------------------------- */
 
-const CHART_OF_ACCOUNTS = [
+let CHART_OF_ACCOUNTS = [
   {category:"Consulting Revenue", type:"Income", notes:"IT consulting / enterprise architecture engagements"},
   {category:"Product/Photography Revenue", type:"Income", notes:"AD Photoz income"},
   {category:"Other Revenue", type:"Income", notes:"Any income not covered above"},
@@ -1015,6 +1049,22 @@ const CHART_OF_ACCOUNTS = [
   {category:"Dividends", type:"Expense", notes:"Dividend payments to shareholders"},
   {category:"Other Expense", type:"Expense", notes:"Anything not covered above"},
 ];
+const CHART_OF_ACCOUNTS_DEFAULT = JSON.parse(JSON.stringify(CHART_OF_ACCOUNTS));
+// Categories looked up by exact name elsewhere in the app (Payroll, Invoicing
+// service-line mapping, refund linking, bank-import fallback guesses, CRA Prep's
+// meals flag) — protected from rename/delete so those features can't silently
+// break. Everything else in the Chart of Accounts is freely editable.
+const SYSTEM_CATEGORIES = new Set([
+  "Consulting Revenue","Product/Photography Revenue","Other Revenue","Other Expense",
+  "Refunds & Rebates Received","Meals & Entertainment (50%)","Salary/Wages","Dividends",
+]);
+function loadChartOfAccounts(){
+  try{
+    const stored = JSON.parse(gLS_get('chart_of_accounts') || 'null');
+    if(stored && Array.isArray(stored) && stored.length) CHART_OF_ACCOUNTS = stored;
+  }catch(e){}
+}
+function saveChartOfAccountsToStorage(){ gLS_set('chart_of_accounts', JSON.stringify(CHART_OF_ACCOUNTS)); }
 const SERVICE_TO_CATEGORY = {
   "Consulting": "Consulting Revenue",
   "Photography": "Product/Photography Revenue",
@@ -1497,6 +1547,11 @@ function openTxnModal(existing, opts){
   document.getElementById('txnType').value = 'Income';
   refreshTxnCategoryOptions();
   showReceiptPreview(null);
+  refundLinkDraftId = null;
+  document.getElementById('txnIsRefund').checked = false;
+  document.getElementById('refundLinkWrap').style.display = 'none';
+  document.getElementById('refundLinkSearch').value = '';
+  document.getElementById('refundLinkSummary').textContent = '';
   if(existing){
     document.getElementById('modalTitle').textContent = opts.readonly ? 'Transaction details' : 'Edit transaction';
     document.getElementById('txnId').value = existing.id;
@@ -1511,12 +1566,57 @@ function openTxnModal(existing, opts){
     document.getElementById('txnGst').value = existing.gst;
     document.getElementById('txnNotes').value = existing.notes || '';
     if(existing.receipt && existing.receipt.dataUrl) showReceiptPreview(existing.receipt.dataUrl);
+    if(existing.refundOfId){
+      refundLinkDraftId = existing.refundOfId;
+      document.getElementById('txnIsRefund').checked = true;
+      document.getElementById('refundLinkWrap').style.display = 'block';
+      renderRefundLinkOptions();
+      document.getElementById('refundLinkSelect').value = existing.refundOfId;
+      updateRefundLinkSummary();
+    }
   } else {
     document.getElementById('modalTitle').textContent = 'Add transaction';
   }
   calcTotal();
   setTxnFormReadonly(!!opts.readonly);
   document.getElementById('txnOverlay').classList.add('open');
+}
+let refundLinkDraftId = null;
+function toggleRefundLinkUI(){
+  const on = document.getElementById('txnIsRefund').checked;
+  document.getElementById('refundLinkWrap').style.display = on ? 'block' : 'none';
+  if(on) renderRefundLinkOptions();
+  else { refundLinkDraftId = null; document.getElementById('refundLinkSummary').textContent = ''; }
+}
+function renderRefundLinkOptions(){
+  const search = document.getElementById('refundLinkSearch').value.toLowerCase();
+  const selfId = document.getElementById('txnId').value;
+  let candidates = liveTxns().filter(t=> t.type==='Expense' && t.id!==selfId && t.category!=='Refunds & Rebates Received');
+  if(search) candidates = candidates.filter(t=> (t.description||'').toLowerCase().includes(search) || (t.party||'').toLowerCase().includes(search) || t.date.includes(search) || String(t.amount).includes(search));
+  candidates.sort((a,b)=> b.date.localeCompare(a.date));
+  candidates = candidates.slice(0,50); // keep the list manageable
+  const sel = document.getElementById('refundLinkSelect');
+  sel.innerHTML = candidates.map(t=>`<option value="${t.id}">${t.date} — ${escapeHtml(t.description||'(no description)')} — ${fmt(t.amount)}</option>`).join('');
+  if(refundLinkDraftId && candidates.some(t=>t.id===refundLinkDraftId)) sel.value = refundLinkDraftId;
+}
+function onRefundLinkSelected(){
+  const sel = document.getElementById('refundLinkSelect');
+  refundLinkDraftId = sel.value || null;
+  if(refundLinkDraftId){
+    const original = ALL_TXNS.find(t=>t.id===refundLinkDraftId);
+    if(original){
+      document.getElementById('txnType').value = 'Expense';
+      refreshTxnCategoryOptions();
+      document.getElementById('txnCategory').value = original.category;
+    }
+  }
+  updateRefundLinkSummary();
+}
+function updateRefundLinkSummary(){
+  const el = document.getElementById('refundLinkSummary');
+  if(!refundLinkDraftId){ el.textContent = ''; return; }
+  const original = ALL_TXNS.find(t=>t.id===refundLinkDraftId);
+  el.textContent = original ? `Linked to: ${original.date} — ${original.description || '(no description)'} — ${fmt(original.amount)}` : '';
 }
 function setTxnFormReadonly(readonly){
   const form = document.getElementById('txnForm');
@@ -1571,6 +1671,7 @@ async function saveTxn(){
     receipt: receiptDraft ? {dataUrl: receiptDraft.dataUrl} : null,
     invoiceId: existing ? existing.invoiceId : null,
     invoiceNumber: existing ? existing.invoiceNumber : null,
+    refundOfId: document.getElementById('txnIsRefund').checked ? refundLinkDraftId : null,
     lastModified: Date.now(),
   };
   await putTxn(t);
@@ -1679,24 +1780,54 @@ function renderTransactions(){
     : renderTxnTable(list, true);
   updateTxnBulkBar();
 }
+function groupRefundsUnderParents(list){
+  const ids = new Set(list.map(t=>t.id));
+  const childrenByParent = {};
+  list.forEach(t=>{
+    if(t.refundOfId && ids.has(t.refundOfId)){
+      (childrenByParent[t.refundOfId] = childrenByParent[t.refundOfId] || []).push(t);
+    }
+  });
+  const childIds = new Set();
+  Object.values(childrenByParent).forEach(arr=> arr.forEach(t=>childIds.add(t.id)));
+  const out = [];
+  list.forEach(t=>{
+    if(childIds.has(t.id)) return; // inserted right after its parent below instead
+    out.push(Object.assign({}, t, {_indent:false, _refundChildren: childrenByParent[t.id]||[]}));
+    (childrenByParent[t.id]||[]).slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(child=>{
+      out.push(Object.assign({}, child, {_indent:true}));
+    });
+  });
+  return out;
+}
 function renderTxnTable(list, selectable){
   const allChecked = selectable && list.length>0 && list.every(t=>selectedTxnIds.has(t.id));
+  const grouped = groupRefundsUnderParents(list);
   return `<table><thead><tr>
     ${selectable? `<th><input type="checkbox" ${allChecked?'checked':''} onchange="toggleAllVisibleTxns(this.checked)" title="Select all visible"></th>`:''}
     <th>Date</th><th>Type</th><th>Category</th><th>Description</th><th>Client/Vendor</th>
     <th style="text-align:right">Amount</th><th style="text-align:right">GST/HST</th><th style="text-align:right">Total</th>
   </tr></thead><tbody>
-    ${list.map(t=>`<tr>
-      ${selectable? `<td><input type="checkbox" ${selectedTxnIds.has(t.id)?'checked':''} onchange="toggleTxnSelect('${t.id}', this.checked)"></td>`:''}
-      <td>${t.date}</td>
+    ${grouped.map(t=>{
+      const refundChildren = t._refundChildren || [];
+      const refundTotal = refundChildren.reduce((s,c)=>s+c.amount,0);
+      return `<tr${t._indent?' style="background:#F9FAFC;"':''}>
+      ${selectable? `<td>${t._indent?'':`<input type="checkbox" ${selectedTxnIds.has(t.id)?'checked':''} onchange="toggleTxnSelect('${t.id}', this.checked)">`}</td>`:''}
+      <td>${t._indent?'<span style="color:var(--ink-soft);">↳</span> ':''}${t.date}</td>
       <td><span class="badge ${t.type==='Income'?'income':'expense'}">${t.type}</span></td>
       <td>${escapeHtml(t.category)}</td>
-      <td><a href="#" onclick="event.preventDefault(); openTxnDetail('${t.id}')" style="color:var(--navy);font-weight:600;text-decoration:none;">${escapeHtml(t.description)||'(no description)'}</a>${t.invoiceNumber? `<div style="font-size:11px;color:var(--ink-soft);">🧾 ${escapeHtml(t.invoiceNumber)}</div>`:''}${t.receipt&&t.receipt.dataUrl?'<div style="font-size:11px;color:var(--ink-soft);">📎 receipt attached</div>':''}</td>
+      <td>
+        <a href="#" onclick="event.preventDefault(); openTxnDetail('${t.id}')" style="color:var(--navy);font-weight:600;text-decoration:none;${t._indent?'font-weight:500;':''}">${t._indent?'Refund — ':''}${escapeHtml(t.description)||'(no description)'}</a>
+        ${t.invoiceNumber? `<div style="font-size:11px;color:var(--ink-soft);">🧾 ${escapeHtml(t.invoiceNumber)}</div>`:''}
+        ${t.receipt&&t.receipt.dataUrl?'<div style="font-size:11px;color:var(--ink-soft);">📎 receipt attached</div>':''}
+        ${refundChildren.length? `<div style="font-size:11px;color:var(--ink-soft);">🔁 ${refundChildren.length} refund${refundChildren.length>1?'s':''} linked, ${fmt(refundTotal)}</div>`:''}
+      </td>
       <td>${escapeHtml(t.party)||'<span style="color:var(--ink-soft)">—</span>'}</td>
       <td class="num">${fmt(t.amount)}</td>
       <td class="num">${fmt(t.gst)}</td>
       <td class="num"><b>${fmt(t.total)}</b></td>
-    </tr>`).join('')}
+    </tr>`;
+    }).join('')}
   </tbody></table>`;
 }
 function toggleTxnSelect(id, checked){
@@ -1842,6 +1973,12 @@ function nextInvoiceNumber(year){
     }
   });
   return prefix + String(max+1).padStart(3,'0');
+}
+
+function setSettingsGroup(group){
+  document.querySelectorAll('[data-settingsgroup]').forEach(b=>b.classList.toggle('active', b.dataset.settingsgroup===group));
+  document.getElementById('settingsGroupSettings').style.display = group==='settings' ? 'block' : 'none';
+  document.getElementById('settingsGroupMasters').style.display = group==='masters' ? 'block' : 'none';
 }
 
 function setInvoiceMode(mode){
@@ -3429,9 +3566,74 @@ function resetGifiMap(){
 
 /* ---------- Settings: Chart of Accounts ---------- */
 function renderCoa(){
-  document.getElementById('coaTable').innerHTML = CHART_OF_ACCOUNTS.map(c=>
-    `<tr><td>${escapeHtml(c.category)}</td><td><span class="badge ${c.type==='Income'?'income':'expense'}">${c.type}</span></td><td style="color:var(--ink-soft)">${escapeHtml(c.notes)}</td></tr>`
-  ).join('');
+  document.getElementById('coaTable').innerHTML = CHART_OF_ACCOUNTS.map(c=>{
+    const locked = SYSTEM_CATEGORIES.has(c.category);
+    return `<tr>
+      <td>${escapeHtml(c.category)}${locked?' <span title="Used by name elsewhere in the app (Payroll, Invoicing, CRA Prep) — protected from renaming or deletion" style="cursor:help;">🔒</span>':''}</td>
+      <td><span class="badge ${c.type==='Income'?'income':'expense'}">${c.type}</span></td>
+      <td style="color:var(--ink-soft)">${escapeHtml(c.notes)}</td>
+      <td>${locked ? '' : `<div class="row-actions">
+        <button class="icon-btn" title="Edit" onclick='editCoaCategory("${escapeHtml(c.category)}")'>✏️</button>
+        <button class="icon-btn del" title="Delete" onclick='deleteCoaCategory("${escapeHtml(c.category)}")'>🗑️</button>
+      </div>`}</td>
+    </tr>`;
+  }).join('');
+}
+function resetCoaForm(){
+  document.getElementById('coaForm').reset();
+  document.getElementById('coaOriginalName').value = '';
+  document.getElementById('coaFormTitle').textContent = 'Add category';
+  document.getElementById('coaCancelBtn').style.display = 'none';
+  document.getElementById('coaType').value = 'Expense';
+}
+function editCoaCategory(name){
+  const c = CHART_OF_ACCOUNTS.find(x=>x.category===name);
+  if(!c || SYSTEM_CATEGORIES.has(name)) return;
+  document.getElementById('coaOriginalName').value = c.category;
+  document.getElementById('coaName').value = c.category;
+  document.getElementById('coaType').value = c.type;
+  document.getElementById('coaNotes').value = c.notes || '';
+  document.getElementById('coaFormTitle').textContent = 'Edit category';
+  document.getElementById('coaCancelBtn').style.display = 'inline-flex';
+}
+function saveCoaCategory(){
+  const name = document.getElementById('coaName').value.trim();
+  if(!name){ alert('Category name is required.'); return; }
+  const type = document.getElementById('coaType').value;
+  const notes = document.getElementById('coaNotes').value.trim();
+  const originalName = document.getElementById('coaOriginalName').value;
+
+  if(originalName && SYSTEM_CATEGORIES.has(originalName)){ alert('This category is protected and cannot be edited.'); return; }
+  if(!originalName && CHART_OF_ACCOUNTS.some(c=>c.category===name)){ alert('A category with that name already exists.'); return; }
+  if(originalName && name!==originalName && CHART_OF_ACCOUNTS.some(c=>c.category===name)){ alert('A category with that name already exists.'); return; }
+
+  if(originalName){
+    // Editing: update in place, and if the name changed, update any live
+    // transactions/categories referencing the old name so nothing orphans.
+    const idx = CHART_OF_ACCOUNTS.findIndex(c=>c.category===originalName);
+    if(idx>=0) CHART_OF_ACCOUNTS[idx] = {category:name, type, notes};
+    if(name !== originalName){
+      liveTxns().forEach(async t=>{
+        if(t.category===originalName){ t.category = name; t.lastModified = Date.now(); await putTxn(t); }
+      });
+    }
+  } else {
+    CHART_OF_ACCOUNTS.push({category:name, type, notes});
+  }
+  saveChartOfAccountsToStorage();
+  resetCoaForm();
+  renderCoa();
+  toast('Category saved');
+}
+async function deleteCoaCategory(name){
+  if(SYSTEM_CATEGORIES.has(name)){ alert('This category is protected and cannot be deleted.'); return; }
+  const inUse = liveTxns().some(t=>t.category===name);
+  if(inUse && !confirm(`"${name}" is used by existing transactions. Deleting it from the Chart of Accounts won't change those transactions, but you won't be able to pick it for new ones. Continue?`)) return;
+  if(!inUse && !confirm(`Delete category "${name}"?`)) return;
+  CHART_OF_ACCOUNTS = CHART_OF_ACCOUNTS.filter(c=>c.category!==name);
+  saveChartOfAccountsToStorage();
+  renderCoa();
+  toast('Category deleted');
 }
 
 /* ---------- Export / Import ---------- */
@@ -3808,7 +4010,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v19 — 2026-07-27';
+const APP_VERSION = 'v20 — 2026-07-31';
 
 async function forceUpdateApp(){
   try{
@@ -3874,6 +4076,7 @@ async function reloadAll(){
     }
     return; // stop here — nothing below this works without a database connection
   }
+  loadChartOfAccounts();
   populateCategorySelect(document.getElementById('txnCategory'), false, 'Income');
   renderCoa();
   renderGifiMapTable();
