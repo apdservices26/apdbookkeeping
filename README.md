@@ -1,5 +1,10 @@
 # APD Services Bookkeeping — Version Notes
-
+v21 — 2026-09-15
+App Lock added. Optional full-screen sign-in gate covering the entire app shell — nothing is visible (no dashboard, no data) until an authorized Google account signs in. Configured in Settings: a toggle to enable, and a comma-separated list of allowed email addresses (so both Amit and Rashmi can be added). Uses Google's ID-token sign-in flow — separate from the OAuth flow that powers Drive sync, using the same Client ID already configured.
+Once verified, a device stays trusted for 30 days before needing to sign in again
+"Lock this device now" button forces immediate re-verification on that device
+Off by default — existing setups are unaffected unless explicitly turned on
+Honest limitation, by design: this is a casual-access deterrent (lost/borrowed device, a stray link), not server-enforced security — there's no backend to reject a technically sophisticated bypass, since this app has always been a single static file with no server. For a personal bookkeeping tool this is the right level of protection for the actual risk, but worth knowing plainly rather than assuming more than what's there.
 ---
 
 ## v20 — 2026-07-31
