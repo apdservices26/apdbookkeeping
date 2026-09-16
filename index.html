@@ -517,6 +517,22 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     </div>
 
     <div class="card">
+      <h2>App Lock <small>Requires signing in with an authorized Google account before the app shell is visible at all. A casual-access deterrent (lost/borrowed device, stray link) — not enterprise-grade security, since this app has no server to enforce it against a determined attacker.</small></h2>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);font-weight:600;margin-bottom:12px;">
+        <input type="checkbox" id="appLockEnabled" style="width:auto;"> Require sign-in to open this app
+      </label>
+      <div class="field full" style="margin-bottom:12px;">
+        <label>Allowed email address(es), comma-separated</label>
+        <input type="text" id="appLockEmails" placeholder="amit@example.com, rashmi@example.com">
+      </div>
+      <div class="actions">
+        <button class="btn secondary sm" onclick="saveAppLockSettings()">Save</button>
+        <button class="btn danger sm" onclick="lockAppNow()">🔒 Lock this device now</button>
+      </div>
+      <p class="hint" id="appLockTrustStatus" style="margin-top:10px;"></p>
+    </div>
+
+    <div class="card">
       <h2>This device's name <small>Used to label backups and sync files so you can tell which device they came from — e.g. "Amit's Phone" or "Office PC". Set this separately on each device.</small></h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <input type="text" id="deviceLabelInput" placeholder="e.g. Amit's Galaxy S24 FE" style="flex:1;min-width:200px;border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:14px;">
@@ -2592,6 +2608,126 @@ function loadGIS(){
   });
 }
 
+/* =====================================================
+   APP LOCK — gates the whole app shell behind a Google
+   sign-in restricted to specific email(s). Separate from
+   the Drive OAuth flow above (this uses Google's ID-token
+   sign-in flow — "who is this," not "what can this app do").
+   This is a casual-access deterrent, not server-enforced
+   security — see the design notes shared with the user.
+===================================================== */
+const APPLOCK_TRUST_DAYS = 30;
+
+function getAppLockConfig(){
+  return {
+    enabled: gLS_get('applock_enabled') === '1',
+    emails: (gLS_get('applock_emails') || '').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean),
+  };
+}
+function decodeJwtPayload(token){
+  const base64Url = token.split('.')[1];
+  const base64 = base64Url.replace(/-/g,'+').replace(/_/g,'/');
+  const json = decodeURIComponent(atob(base64).split('').map(c=>'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+  return JSON.parse(json);
+}
+function isAppLockTrusted(){
+  try{
+    const rec = JSON.parse(gLS_get('applock_trust') || 'null');
+    if(!rec || !rec.email || !rec.verifiedAt) return false;
+    if(Date.now() - rec.verifiedAt > APPLOCK_TRUST_DAYS*86400000) return false;
+    const cfg = getAppLockConfig();
+    return cfg.emails.includes(rec.email.toLowerCase());
+  }catch(e){ return false; }
+}
+function showAppLockGate(){
+  document.getElementById('appLockGate').style.display = 'flex';
+}
+function hideAppLockGate(){
+  document.getElementById('appLockGate').style.display = 'none';
+}
+function checkAppLockOnLoad(){
+  const cfg = getAppLockConfig();
+  if(!cfg.enabled || cfg.emails.length===0){ hideAppLockGate(); return; }
+  if(isAppLockTrusted()){ hideAppLockGate(); return; }
+  showAppLockGate();
+  initAppLockGoogleButton();
+}
+async function initAppLockGoogleButton(){
+  const clientId = gLS_get('gdrive_client_id');
+  const hint = document.getElementById('appLockSetupHint');
+  const btnWrap = document.getElementById('appLockGoogleBtn');
+  if(!clientId){
+    btnWrap.innerHTML = '';
+    hint.textContent = 'App Lock needs a Google OAuth Client ID configured first — see Settings → Google Drive sync (this happens on the device where you originally set that up).';
+    hint.style.display = 'block';
+    return;
+  }
+  hint.style.display = 'none';
+  try{
+    await loadGIS();
+    google.accounts.id.initialize({ client_id: clientId, callback: handleAppLockCredential, auto_select: false });
+    btnWrap.innerHTML = '';
+    google.accounts.id.renderButton(btnWrap, { theme:'outline', size:'large', width:280, text:'signin_with' });
+  }catch(err){
+    document.getElementById('appLockError').textContent = err.message;
+    document.getElementById('appLockError').style.display = 'block';
+  }
+}
+function handleAppLockCredential(response){
+  const errEl = document.getElementById('appLockError');
+  try{
+    const payload = decodeJwtPayload(response.credential);
+    const email = (payload.email || '').toLowerCase();
+    const cfg = getAppLockConfig();
+    if(payload.email_verified && cfg.emails.includes(email)){
+      gLS_set('applock_trust', JSON.stringify({email, verifiedAt: Date.now()}));
+      errEl.style.display = 'none';
+      hideAppLockGate();
+      toast('Signed in as ' + payload.email);
+      renderAppLockSettingsUI();
+    } else {
+      errEl.textContent = `This Google account (${payload.email || 'unknown'}) is not authorized for this app.`;
+      errEl.style.display = 'block';
+    }
+  }catch(err){
+    errEl.textContent = 'Sign-in failed: ' + err.message;
+    errEl.style.display = 'block';
+  }
+}
+function renderAppLockSettingsUI(){
+  const cfg = getAppLockConfig();
+  const enabledEl = document.getElementById('appLockEnabled');
+  const emailsEl = document.getElementById('appLockEmails');
+  if(!enabledEl) return;
+  enabledEl.checked = cfg.enabled;
+  emailsEl.value = gLS_get('applock_emails') || '';
+  let rec = null;
+  try{ rec = JSON.parse(gLS_get('applock_trust') || 'null'); }catch(e){}
+  const statusEl = document.getElementById('appLockTrustStatus');
+  if(rec && rec.email && isAppLockTrusted()){
+    const daysLeft = Math.max(0, APPLOCK_TRUST_DAYS - Math.floor((Date.now()-rec.verifiedAt)/86400000));
+    statusEl.textContent = `This device is currently trusted as ${rec.email} (${daysLeft} day${daysLeft!==1?'s':''} left before re-verification is needed).`;
+  } else {
+    statusEl.textContent = cfg.enabled ? 'This device is not currently signed in.' : 'App Lock is off — anyone with access to this device can open the app.';
+  }
+}
+function saveAppLockSettings(){
+  const enabled = document.getElementById('appLockEnabled').checked;
+  const emailsRaw = document.getElementById('appLockEmails').value.trim();
+  if(enabled && !emailsRaw){ alert('Add at least one allowed email address before enabling App Lock.'); return; }
+  gLS_set('applock_enabled', enabled ? '1' : '0');
+  gLS_set('applock_emails', emailsRaw);
+  toast('App Lock settings saved');
+  renderAppLockSettingsUI();
+  checkAppLockOnLoad(); // takes effect immediately, no reload needed
+}
+function lockAppNow(){
+  gLS_remove('applock_trust');
+  toast('This device is now locked — sign-in required');
+  renderAppLockSettingsUI();
+  checkAppLockOnLoad();
+}
+
 function setGDriveStatus(text, cls){
   const el = document.getElementById('gdriveStatus');
   el.textContent = text;
@@ -4010,7 +4146,7 @@ async function clearAllInvoices(){
   toast('All invoices and clients deleted');
 }
 
-const APP_VERSION = 'v20 — 2026-07-31';
+const APP_VERSION = 'v21 — 2026-09-15';
 
 async function forceUpdateApp(){
   try{
@@ -4065,6 +4201,7 @@ async function reloadAll(){
 }
 
 (async function init(){
+  checkAppLockOnLoad(); // show the gate immediately if locked, before anything else loads
   try{
     db = await openDb();
   }catch(err){
@@ -4084,6 +4221,7 @@ async function reloadAll(){
   await reloadAll();
   populateEmployeeSelect();
   initGDriveUI();
+  renderAppLockSettingsUI();
   const dl = document.getElementById('deviceLabelInput'); if(dl) dl.value = gLS_get('device_label') || '';
   document.getElementById('appVersionLabel').textContent = `Running: ${APP_VERSION}`;
   document.getElementById('footerVersion').textContent = APP_VERSION;
@@ -4111,5 +4249,15 @@ async function reloadAll(){
   }
 })();
 </script>
+<div id="appLockGate" style="display:none;position:fixed;inset:0;z-index:999;background:linear-gradient(135deg,#1F3864 0%, #152744 100%);align-items:center;justify-content:center;flex-direction:column;padding:24px;">
+  <div style="color:#fff;font-weight:800;font-size:20px;letter-spacing:.3px;margin-bottom:22px;">APD Services</div>
+  <div style="background:#fff;border-radius:16px;padding:32px 28px;max-width:360px;width:100%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.35);">
+    <h2 style="color:#1F3864;margin:0 0 8px;font-size:18px;">Sign in to continue</h2>
+    <p style="color:#5B6B82;font-size:13px;margin:0 0 20px;">This app is restricted to authorized Google accounts.</p>
+    <div id="appLockGoogleBtn" style="display:flex;justify-content:center;min-height:44px;"></div>
+    <p id="appLockError" style="display:none;color:#B4262A;font-size:12.5px;margin-top:14px;"></p>
+    <p id="appLockSetupHint" style="display:none;color:#5B6B82;font-size:12px;margin-top:14px;"></p>
+  </div>
+</div>
 </body>
 </html>
