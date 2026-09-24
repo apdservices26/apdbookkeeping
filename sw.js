@@ -1,12 +1,4 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-const CACHE = "apd-bookkeeping-v19";
-=======
 const CACHE = "apd-bookkeeping-v20";
->>>>>>> parent of f23a3f3 (V21)
-=======
-const CACHE = "apd-bookkeeping-v19";
->>>>>>> parent of abeb3e4 (v20 — 2026-07-31)
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./favicon.png", "./icon-192.png", "./icon-512.png", "./logo_white.png"];
 
 self.addEventListener("install", (event) => {
