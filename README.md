@@ -1,3 +1,13 @@
+v20
+
+1. Settings/Masters split (Option C) — Settings tab now has a segment toggle at the top; no nav bar changes.
+
+2. Refund linking (optional) — new checkbox in the transaction form: "This is a refund of an existing transaction." Search and pick the original purchase; it auto-inherits that transaction's category, then nests visually under it in the Transactions list with a "🔁 refund linked" indicator on the parent. Tested the grouping logic directly — it correctly nests when the parent's visible, and gracefully falls back to a normal row if the parent gets filtered out or deleted, so nothing breaks. Skipping the link still works exactly as before (fallback "Refunds & Rebates Received" category).
+
+3. Editable Chart of Accounts — Settings → Masters → Chart of Accounts now has an add/edit/delete form. Verified all 8 protected categories (the ones Payroll, Invoicing, refunds, and CRA Prep depend on by name) are correctly locked with a 🔒 icon and can't be renamed or deleted — everything else, including anything new you add, is fully yours to edit.
+
+Deploy as usual, confirm the footer shows v20.
+
 v17 — 2026-07-27
 Backups saved to a subfolder. Local exports (JSON backup + CSV) now download to Downloads/APD_Backups/ instead of loose in Downloads.
 Device identification. New Settings → "This device's name" field. Shows up in local export filenames, Google Drive snapshot filenames, and the "View available backups" list — so you can tell which device a backup came from.
